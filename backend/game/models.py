@@ -1,7 +1,20 @@
 from django.conf import settings
 from django.db import models
 from django.db.models import Q
-from .catalog import rank_for
+from .catalog import rank_for, STARTER_EQUIPMENT, STARTER_SOFTWARE
+
+
+def starter_equipment():
+    return dict(STARTER_EQUIPMENT)
+
+
+def starter_hardware():
+    return list(STARTER_EQUIPMENT.values())
+
+
+def starter_software():
+    return list(STARTER_SOFTWARE)
+
 
 class SaveSlot(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
@@ -9,13 +22,16 @@ class SaveSlot(models.Model):
     alias = models.CharField(max_length=24)
     balance = models.PositiveIntegerField(default=1200)
     reputation = models.PositiveIntegerField(default=0)
-    hardware = models.PositiveSmallIntegerField(default=1)
-    gateway = models.PositiveSmallIntegerField(default=1)
-    software = models.PositiveSmallIntegerField(default=1)
+    equipment = models.JSONField(default=starter_equipment)
+    owned_hardware = models.JSONField(default=starter_hardware)
+    installed_software = models.JSONField(default=starter_software)
+    running_apps = models.JSONField(default=dict)
+    proxy_route = models.JSONField(default=list)
+    mission_state = models.JSONField(default=dict)
+    contract_cooldowns = models.JSONField(default=dict)
     completed = models.PositiveIntegerField(default=0)
     active_contract = models.CharField(max_length=12, blank=True)
     mission_started = models.DateTimeField(null=True, blank=True)
-    mission_step = models.PositiveSmallIntegerField(default=0)
     mission_log = models.JSONField(default=list)
     created_at = models.DateTimeField(auto_now_add=True)
     class Meta:

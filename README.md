@@ -2,17 +2,52 @@
 
 A browser-based hacker game inspired by the atmosphere of Uplink. Django 5.2 and PostgreSQL 17 own the game state; Vue 3 and Vite power the interface. Hacking takes place entirely inside a fictional, simulated network.
 
-## Playable first slice
+## v0.2 — operator desktop
 
-- Create an account or sign in with a runner handle and passphrase.
-- Maintain three independent save slots, enforced by database constraints.
-- Accept broker contracts at your rank, one above, or one below.
-- Complete `scan → breach → extract → wipe → disconnect` in the remote terminal before its 180-second trace window expires. `help` lists commands; `abort` abandons the job.
-- Earn **Cipher (CPH)**, a provisional fictional currency with no blockchain integration. Payments and purchases appear in each save's separate bank terminal.
-- Gain reputation and rise through Ghost, Signal, Operator, Spectre, and Architect at 0, 100, 250, 450, and 700 reputation. Failed/abandoned contracts deduct 60 reputation, with a floor of zero; ranks can fall.
-- Upgrade hardware, gateway, and software independently from levels 1–5. System power is their sum; contracts require `3 + 2 × contract rank`. Upgrades cost `base price × current level²`.
+- **Persistent terminal focus:** Enter and button submissions keep the command input focused, including failed requests. Up/Down recalls command history. Output can still be selected, and Tab can leave the terminal.
+- **Independent launchers:** the top bar launches the local terminal; the application launcher starts Atlas, the broker, the exchange, Cipher bank, and each installed tool. Running processes have their own consoles and share your machine's RAM. Closing a window does not disconnect a remote session.
+- **Custom machines:** 40 named hardware products across five tiers: two processors, gateways, memory modules, and drives per tier. Hardware purchases enter inventory and must be fitted. Spare components can be sold at half price.
+- **Specialized software:** 50 individual licenses: Cartograph network mappers, Lockpick authentication crackers, Rosetta decryptors, Ashfall log cleaners, and Tripwire trace monitors. Each has five capability classes and Pro/Micro variants. Micro trades speed for lower memory use. Purchased tools must be launched separately.
+- **World routing:** Atlas contains 12 fictional relay locations. Select an ordered proxy chain, reorder/remove hops, and commit it. The route is drawn from your home gateway through the proxies to the reserved target. Pan and zoom the map or use the accessible relay directory. Routes remain committed across sessions.
+- **Manual contracts:** reserve and submit assignments through the local shell. The broker publishes target, artifact, objective, clearance, and reward. There are retrieval, encrypted recovery, and deletion jobs at each rank.
+- **An economy with consequences:** routing leases and tool computation consume Cipher (CPH). Failed jobs cost up to `90 + 80 × job rank` CPH and 60 reputation (both balances floor at zero). Completed jobs return after five minutes; failed ones after ten, using server time. A bankrupt runner can sell spare equipment or explicitly restart that slot by typing their alias.
 
-All game mutations are authenticated, protected by CSRF, and scoped to the save owner. Financial and mission updates lock the save row within a PostgreSQL transaction. Contract rewards are awarded only once per completed mission. Contracts are currently repeatable; ranks, upgrade prices, and currency are centralized in `backend/game/catalog.py`.
+Accounts retain three independent saves. Ranks are Ghost, Signal, Operator, Spectre, and Architect at 0, 100, 250, 450, and 700 reputation. Contracts are available at the runner's rank, one rank above, and one below. Products are purchasable through tier `min(5, rank + 2)`.
+
+### Tool reference
+
+Each console has its own `help` manual. Commands run entirely inside the game's simulation; they never execute OS commands or access an external target.
+
+| Application | Commands / purpose |
+| --- | --- |
+| Local terminal | `apps`, `contracts`, `accept <id>`, `brief`, `route`, `connect <host>`, `status`, `ls`, `get <file>`, `rm <file>`, `disconnect`, `submit`, `abort`, `clear` |
+| Cartograph | `scan <host>` discovers authentication ports and archive metadata |
+| Lockpick | `crack <port>` works against a discovered service with sufficient tool capability |
+| Rosetta | `decrypt <file>` operates on an accessible encrypted archive |
+| Ashfall | `erase` removes remote access logs; later remote operations leave new logs |
+| Tripwire | `trace` reads the live trace; keep a capable monitor running for the desktop countdown |
+| Cipher bank | `balance`, `history` display this save's independent account |
+
+The trace begins when the player connects, not when reserving a contract. Wall-clock time and simulated computation both consume it. CPU speed and tool speed affect computation time. Gateway stealth and proxy delays extend trace time; gateway bandwidth affects transfers. Hop order changes geographical latency. Connections and equipment changes lock the route while online. Copying a file does not automatically complete a contract: the broker verifies objective evidence and a clean exit before paying a manual submission. Higher security can defeat underpowered tools, encrypted files require a decryptor, and local disk space must fit the recovered archive.
+
+Every mutation checks authentication, CSRF, save ownership, and current game state. PostgreSQL row locks protect financial updates and mission completion from concurrent/replayed requests. The test suite exercises both concurrent payment and purchase requests.
+
+### Upgrade an existing v0.1 installation
+
+Back up your database first. With the old Docker stack running:
+
+```bash
+docker compose exec -T db pg_dump -U netrunner netrunner > ../netrunner-before-v0.2.sql
+```
+
+Then pull and rebuild:
+
+```bash
+git pull --ff-only origin main
+docker compose up --build
+```
+
+Django automatically applies migration `0002_runner_desktop`. Existing balances, reputation, completed contracts, saves, and ledger entries are preserved. Old hardware/gateway levels map to named components; old software levels map to appropriate tool licenses. An active v0.1 session is safely closed without a fine or reputation loss. Newly launched applications start from the desktop. Back up before rolling versions back: the old schema cannot represent the new loadout and process state.
 
 ## Download and run on your computer
 
@@ -65,7 +100,7 @@ With `scripts/dev.sh` running:
 bash scripts/test.sh
 ```
 
-This runs the Django suite against a separate PostgreSQL test database, builds Vue, and runs Chromium browser tests. The database role needs permission to create the test database. Browser tests create accounts prefixed `e2e_` in the development database. They test registration, three slots, contract execution, payouts, bank entries, upgrades, sign-out/sign-in, persistence, mobile layout, and server validation. Set `CHROMIUM_PATH` if Chromium is not at `/usr/bin/chromium`.
+This runs the Django suite against a separate PostgreSQL test database, builds Vue, and runs Chromium browser tests. The database role needs permission to create the test database. Browser tests create accounts prefixed `e2e_` in the development database. They verify the manual tools-and-proxy contract loop, persistent cursor focus (including failed requests), bank charges, purchases/fitting/resale, three saves, sign-in persistence, confirmed bankruptcy recovery, and mobile layouts. Set `CHROMIUM_PATH` if Chromium is not at `/usr/bin/chromium`.
 
 Backend-only checks:
 
@@ -77,15 +112,20 @@ source scripts/local-db.sh
 
 ## Project map
 
-- `backend/game/models.py`: save slots and financial ledger.
-- `backend/game/catalog.py`: currency, rank thresholds, contracts, upgrade pricing.
-- `backend/game/views.py`: session authentication and transactional game API.
-- `frontend/src/App.vue`: Vue views, terminal, and API client.
-- `frontend/src/style.css`: responsive interface, including ANSI bright green `#00ff00` terminal output.
-- `scripts/`: repeatable setup, database, startup, and validation commands.
+- `backend/game/models.py`: save slots, owned products, running processes, routes, mission state, and ledger.
+- `backend/game/catalog.py`: named products, relays, currency, jobs, ranks, and cooldowns.
+- `backend/game/mechanics.py`: deterministic command simulation, routing, compute costs, traces, trade, and contract evidence.
+- `backend/game/views.py`: authentication and transactional game API.
+- `frontend/src/components/TerminalConsole.vue`: focus, command input, per-app history and output.
+- `frontend/src/components/NetworkMap.vue`: world map, pan/zoom, ordered proxy editor and relay directory.
+- `frontend/src/components/AppLauncher.vue`: system applications and installed software.
+- `frontend/src/components/ExchangeView.vue`: individual product inventory and trading.
+- `scripts/`: setup, database, startup, and validation commands.
 
-## Scope and next steps
+## Scope and future development
 
-This is a development prototype, not a production deployment. Missions currently use a fixed five-command sequence and a server-validated trace deadline; elapsed missions resolve when the next command is submitted. There is no background simulation, email recovery, transfer system, real cryptocurrency, or external network hacking. Upgrade power controls target access; richer equipment effects, generated contracts, and narrative events are future gameplay work.
+This is a development prototype with a fictional network. Contracts are a finite authored pool that recycles after cooldowns. Failure is determined by tools, funds, memory, storage, trace time, and remote evidence; there is no hidden random success roll. Timers are checked on server requests, with the desktop polling active connections every five seconds. Closing the browser does not pause a trace. All running processes represent game state, not real software execution.
+
+Future gameplay can add generated clients and stories, relay outages, richer remote filesystems, consumable exploits, hardware compatibility, and recurring operating expenses. There is no email recovery, transfer system, real cryptocurrency, or external network hacking.
 
 Before public hosting, add authentication rate limiting and password recovery, use a production WSGI/ASGI server and managed PostgreSQL with proper credentials, serve the built frontend behind HTTPS, set `DJANGO_DEBUG=0`, provide a unique secret key and exact allowed hosts/trusted origins, and run Django deployment checks. External Google fonts are optional; local font fallbacks are included.

@@ -1,9 +1,20 @@
 {
   "name": "netrunner-terminal",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
-  "scripts": {"dev": "vite --host 127.0.0.1", "build": "vite build", "test:e2e": "playwright test"},
-  "dependencies": {"vue": "^3.5.22", "lucide-vue-next": "^0.468.0"},
-  "devDependencies": {"@vitejs/plugin-vue": "^6.0.1", "vite": "^7.1.7", "@playwright/test": "^1.56.0"}
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "vue": "^3.5.22",
+    "lucide-vue-next": "^0.468.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.1",
+    "vite": "^7.1.7",
+    "@playwright/test": "^1.56.0"
+  }
 }

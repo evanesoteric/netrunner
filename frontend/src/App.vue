@@ -1,17 +1,23 @@
 <script setup>
-import { computed, ref, onMounted, onUnmounted, nextTick } from 'vue'
-import { Terminal, Network, BriefcaseBusiness, Cpu, Landmark, Layers3, ArrowUpRight, ArrowRight, ChevronRight, Radio, ShieldCheck, LogOut, Plus, X, Check, Globe, Fingerprint, Activity, HardDrive, Code2, LockKeyhole, Zap } from 'lucide-vue-next'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { Terminal, Network, BriefcaseBusiness, Cpu, Landmark, Layers3, ArrowUpRight, ArrowRight, ChevronRight, Radio, ShieldCheck, LogOut, Plus, X, Check, Globe, Fingerprint, Activity, Grid2X2, Play, LockKeyhole } from 'lucide-vue-next'
+import TerminalConsole from './components/TerminalConsole.vue'
+import AppLauncher from './components/AppLauncher.vue'
+import ExchangeView from './components/ExchangeView.vue'
+import NetworkMap from './components/NetworkMap.vue'
 
 const user = ref(null), slot = ref(null), saves = ref([]), page = ref('overview'), loading = ref(true), busy = ref(false), error = ref(''), notice = ref('')
-const authMode = ref('register'), username = ref(''), password = ref(''), alias = ref(''), commandText = ref(''), logEl = ref(null), now = ref(Date.now()), selectedPosition = ref(1)
-const ranks = ref([]), currency = ref({ name: 'Cipher', symbol: 'CPH' })
-let clock
-const nav = [{ id: 'overview', label: 'Overview', icon: Network }, { id: 'broker', label: 'Contract broker', icon: BriefcaseBusiness }, { id: 'terminal', label: 'Remote terminal', icon: Terminal }, { id: 'gateway', label: 'My gateway', icon: Cpu }, { id: 'bank', label: 'Cipher bank', icon: Landmark }]
+const authMode = ref('register'), username = ref(''), password = ref(''), alias = ref(''), now = ref(Date.now()), selectedPosition = ref(1)
+const ranks = ref([]), currency = ref({ name: 'Cipher', symbol: 'CPH' }), activeConsole = ref('terminal')
+const restartOpen = ref(false), restartConfirmation = ref(''), responseTime = ref(Date.now())
+let clock, poller, revision = 0, polling = false, serverOffset = 0
+const nav = [{ id: 'overview', label: 'Desktop', icon: Network }, { id: 'launcher', label: 'Applications', icon: Grid2X2 }, { id: 'saves', label: 'Save slots', icon: Layers3 }]
 const money = n => new Intl.NumberFormat('en-US').format(n ?? 0)
 const progress = computed(() => slot.value?.next_rank_at ? Math.min(100, (slot.value.reputation - slot.value.rank_floor) / (slot.value.next_rank_at - slot.value.rank_floor) * 100) : 100)
-const remaining = computed(() => slot.value?.mission_started ? Math.max(0, 180 - Math.floor((now.value - Date.parse(slot.value.mission_started)) / 1000)) : 180)
-const power = computed(() => slot.value ? slot.value.hardware + slot.value.gateway + slot.value.software : 0)
-const suggested = computed(() => ['scan', 'breach', 'extract', 'wipe', 'disconnect'][slot.value?.mission_step || 0])
+const remaining = computed(() => slot.value?.trace_remaining == null ? null : Math.max(0, slot.value.trace_remaining - Math.floor((now.value - responseTime.value) / 1000)))
+const cooled = job => job.available_at && Date.parse(job.available_at) > now.value + serverOffset
+const cooldown = job => Math.max(0, Math.ceil((Date.parse(job.available_at) - now.value - serverOffset) / 1000))
+const currentProcess = computed(() => slot.value?.running_apps.find(app => app.id === activeConsole.value))
 
 async function api(path, data) {
   const csrf = document.cookie.split('; ').find(c => c.startsWith('csrftoken='))?.split('=')[1]
@@ -20,10 +26,14 @@ async function api(path, data) {
   if (!response.ok) throw new Error(result.error || 'Request failed. Please reconnect.')
   return result
 }
+function updateSlot(value) {
+  revision++; slot.value = value; responseTime.value = Date.now()
+  if (value.server_time) serverOffset = Date.parse(value.server_time) - Date.now()
+}
 async function act(fn) {
-  if (busy.value) return
+  if (busy.value) return false
   busy.value = true; error.value = ''; notice.value = ''
-  try { await fn() } catch (e) { error.value = e.message } finally { busy.value = false }
+  try { return await fn() } catch (e) { error.value = e.message; return false } finally { busy.value = false }
 }
 async function loadSaves() {
   saves.value = (await api('slots/')).slots
@@ -34,54 +44,74 @@ async function loadSaves() {
   }
 }
 async function selectSlot(save) {
-  slot.value = await api(`slots/${save.id}/`)
+  updateSlot(await api(`slots/${save.id}/`))
   try { localStorage.setItem('netrunner.slot', save.id) } catch { /* storage is optional */ }
-  page.value = 'overview'
+  restartOpen.value = false; page.value = 'overview'
 }
 async function authenticate() {
   await act(async () => {
     await api(authMode.value === 'register' ? 'register/' : 'login/', { username: username.value, password: password.value })
-    user.value = (await api('session/')).user
-    password.value = ''
-    await loadSaves()
+    user.value = (await api('session/')).user; password.value = ''; await loadSaves()
   })
 }
 async function createSave() {
   await act(async () => {
     const created = await api('slots/', { position: selectedPosition.value, alias: alias.value })
-    slot.value = created
+    updateSlot(created)
     try { localStorage.setItem('netrunner.slot', created.id) } catch { /* storage is optional */ }
     alias.value = ''; page.value = 'overview'; await loadSaves()
   })
 }
 async function logOut() {
-  await act(async () => { await api('logout/', {}); user.value = null; slot.value = null; saves.value = []; page.value = 'overview' })
+  await act(async () => { await api('logout/', {}); revision++; user.value = null; slot.value = null; saves.value = []; page.value = 'overview' })
 }
-async function acceptContract(contract) {
-  await act(async () => { slot.value = await api(`slots/${slot.value.id}/accept/`, { contract_id: contract.id }); page.value = 'terminal' })
+function activate(app) { activeConsole.value = app; page.value = ({ atlas: 'atlas', broker: 'broker', market: 'exchange', bank: 'bank' }[app] || 'console') }
+async function launchApplication(productId) {
+  await act(async () => {
+    const result = await api(`slots/${slot.value.id}/applications/`, { action: 'launch', product_id: productId })
+    updateSlot(result); activate(result.running_apps.find(app => app.product_id === productId).id)
+  })
 }
-async function sendCommand(cmd = commandText.value) {
-  if (!cmd.trim()) return
-  await act(async () => { slot.value = await api(`slots/${slot.value.id}/command/`, { command: cmd }); commandText.value = ''; await nextTick(); if (logEl.value) logEl.value.scrollTop = logEl.value.scrollHeight })
+async function closeApplication(application) {
+  await act(async () => {
+    updateSlot(await api(`slots/${slot.value.id}/applications/`, { action: 'close', application }))
+    if (activeConsole.value === application) page.value = 'launcher'
+  })
 }
-async function buyUpgrade(kind) {
-  await act(async () => { slot.value = await api(`slots/${slot.value.id}/upgrade/`, { kind }); notice.value = 'Upgrade installed. Your gateway is ready.' })
+async function sendCommand(command, application) {
+  return act(async () => { updateSlot(await api(`slots/${slot.value.id}/command/`, { command, application })); return true })
+}
+async function trade(action, productId) {
+  await act(async () => { updateSlot(await api(`slots/${slot.value.id}/loadout/`, { action, product_id: productId })); notice.value = action === 'buy' ? 'Purchase complete. Hardware must be fitted; software is available in the application launcher.' : action === 'sell' ? 'Product sold. Payment recorded in your ledger.' : 'Component fitted.' })
+}
+async function saveRoute(nodes) {
+  await act(async () => { updateSlot(await api(`slots/${slot.value.id}/route/`, { nodes })); notice.value = 'Proxy chain committed. Connection leases are charged when dialing a target.' })
+}
+async function restartRunner() {
+  await act(async () => { updateSlot(await api(`slots/${slot.value.id}/restart/`, { confirmation: restartConfirmation.value })); restartOpen.value = false; restartConfirmation.value = ''; page.value = 'overview'; notice.value = 'Runner restarted. This slot has a fresh machine and 1,200 CPH.'; await loadSaves() })
 }
 function openSaves() { act(async () => { await loadSaves(); page.value = 'saves' }) }
+async function refreshTrace() {
+  if (!slot.value?.connected || busy.value || polling) return
+  polling = true
+  const marker = revision, id = slot.value.id
+  try { const result = await api(`slots/${id}/`); if (revision === marker && !busy.value && slot.value?.id === id) updateSlot(result) } catch { /* commands report actionable connection errors */ } finally { polling = false }
+}
 onMounted(async () => {
   clock = setInterval(() => { now.value = Date.now() }, 1000)
+  poller = setInterval(refreshTrace, 5000)
   try { const session = await api('session/'); user.value = session.user; ranks.value = session.ranks; currency.value = session.currency; if (user.value) await loadSaves() } catch (e) { error.value = e.message } finally { loading.value = false }
 })
-onUnmounted(() => clearInterval(clock))
+onUnmounted(() => { clearInterval(clock); clearInterval(poller) })
 </script>
 
 <template>
   <div class="app-shell">
     <aside class="sidebar">
       <a class="brand" href="#" @click.prevent="page = 'overview'" aria-label="Netrunner home"><span class="brand-icon"><Terminal :size="23" /></span><span>netrunner<span class="brand-dot">_</span><small>INDEPENDENT NETWORK ACCESS</small></span></a>
-      <div class="workspace-label">WORKSPACE <span>V.0.1</span></div>
+      <div class="workspace-label">WORKSPACE <span>V.0.2</span></div>
       <nav aria-label="Main navigation">
-        <button v-for="item in nav" :key="item.id" :aria-label="item.label" :class="['nav-item', { active: page === item.id }]" @click="page = item.id" :disabled="!slot"><component :is="item.icon" :size="18" /><span>{{ item.label }}</span><span v-if="item.id === 'broker' && slot" class="nav-count">{{ slot.contracts.length }}</span><span v-if="item.id === 'terminal' && slot?.active_contract" class="live-dot"></span></button>
+        <button v-for="item in nav" :key="item.id" :aria-label="item.label" :class="['nav-item', { active: page === item.id }]" @click="item.id === 'saves' ? openSaves() : page = item.id" :disabled="!slot"><component :is="item.icon" :size="18" /><span>{{ item.label }}</span><span v-if="item.id === 'broker' && slot" class="nav-count">{{ slot.contracts.length }}</span><span v-if="item.id === 'terminal' && slot?.active_contract" class="live-dot"></span></button>
       </nav>
       <div class="sidebar-note"><Radio :size="17" /><span>A quieter kind of power.<br><strong>Leave no trace.</strong></span></div>
       <button v-if="user" class="mobile-saves icon-button" @click="openSaves" aria-label="Manage save slots"><Layers3 :size="20" /></button>
@@ -93,7 +123,7 @@ onUnmounted(() => clearInterval(clock))
     </aside>
 
     <div class="main-shell">
-      <header class="topbar"><div class="breadcrumb">NETWORK <ChevronRight :size="12" /><span>{{ !user ? 'ACCESS TERMINAL' : !slot ? 'SAVE SLOTS' : page.replace('gateway', 'MY GATEWAY').replace('bank', 'CIPHER BANK').toUpperCase() }}</span></div><div class="topbar-right"><span class="system-status"><i></i> SYSTEM ONLINE</span><span class="utc">{{ new Date(now).toISOString().slice(11,19) }} UTC</span><button v-if="user" class="icon-button" @click="logOut" :disabled="busy" aria-label="Sign out"><LogOut :size="16" /></button></div></header>
+      <header class="topbar"><div class="breadcrumb">NETWORK <ChevronRight :size="12" /><span>{{ !user ? 'ACCESS TERMINAL' : !slot ? 'SAVE SLOTS' : page.replace('gateway', 'MY GATEWAY').replace('bank', 'CIPHER BANK').toUpperCase() }}</span></div><div class="topbar-right"><button v-if="slot" class="desktop-launch-button" aria-label="Terminal launcher" :disabled="busy" @click="launchApplication('terminal')"><Terminal :size="16" /><span>Terminal</span></button><button v-if="slot" class="desktop-launch-button" aria-label="Application launcher" @click="page = 'launcher'"><Grid2X2 :size="16" /><span>Applications</span></button><span class="system-status"><i></i> SYSTEM ONLINE</span><span class="utc">{{ new Date(now).toISOString().slice(11,19) }} UTC</span><button v-if="user" class="icon-button" @click="logOut" :disabled="busy" aria-label="Sign out"><LogOut :size="16" /></button></div></header>
       <main>
         <div v-if="error" class="message error" role="alert"><span>{{ error }}</span><button @click="error = ''" aria-label="Dismiss error"><X :size="16" /></button></div>
         <div v-if="notice" class="message success" role="status"><Check :size="16" />{{ notice }}</div>
@@ -114,28 +144,33 @@ onUnmounted(() => clearInterval(clock))
         </template>
 
         <template v-else>
+          <div v-if="slot.connected" class="remote-status"><Radio :size="15" /><span>REMOTE LINK / {{ slot.active_contract?.target }}</span><strong>{{ remaining == null ? (slot.running_apps.some(app => app.id === 'monitor') ? 'TRACE UNRESOLVED' : 'TRACE MONITOR OFFLINE') : `TRACE ${remaining}s` }}</strong></div>
+          <div v-if="slot.running_apps.length" class="application-dock" aria-label="Running applications"><div v-for="app in slot.running_apps" :key="app.id" :class="{ selected: activeConsole === app.id && !['overview', 'launcher'].includes(page) }"><button @click="activate(app.id)"><span class="green-dot"></span>{{ app.name }}</button><button :aria-label="`Stop ${app.name}`" :disabled="busy" @click="closeApplication(app.id)"><X :size="12" /></button></div></div>
           <template v-if="page === 'overview'">
-            <div class="eyebrow"><span class="live-dot"></span> GATEWAY CONNECTED / SLOT 0{{ slot.position }}</div><div class="page-heading"><div><h1>Welcome back, {{ slot.alias }}<span>_</span></h1><p>The network is quiet. Let's keep it that way.</p></div><button class="button secondary" @click="page = 'broker'">Find a contract <ArrowUpRight :size="16" /></button></div>
-            <section class="stats-grid"><article class="stat-card"><div class="stat-label">AVAILABLE BALANCE <Landmark :size="17" /></div><div class="stat-value">{{ money(slot.balance) }} <span>CPH</span></div><div class="stat-foot"><span class="green-dot"></span>{{ currency.name }} wallet / connected</div></article><article class="stat-card"><div class="stat-label">RUNNER RANK <ShieldCheck :size="17" /></div><div class="stat-value rank-value">{{ slot.rank_name }} <span>0{{ slot.rank + 1 }}</span></div><div class="stat-foot">{{ slot.reputation }} REP <span class="mini-progress"><i :style="{ width: `${progress}%` }"></i></span><span>{{ slot.next_rank_at || 'MAX' }}</span></div></article><article class="stat-card"><div class="stat-label">CONTRACTS COMPLETED <BriefcaseBusiness :size="17" /></div><div class="stat-value">{{ String(slot.completed).padStart(2,'0') }}</div><div class="stat-foot">{{ slot.active_contract ? '1 active connection' : 'Ready for your next assignment' }}</div></article></section>
-            <div class="dashboard-grid"><section class="panel network-panel"><div class="panel-title"><span><Network :size="16" /> NETWORK TOPOLOGY</span><span class="panel-meta">ENCRYPTED / LOCAL</span></div><div class="network-map"><div class="map-grid"></div><svg viewBox="0 0 600 240" aria-hidden="true"><path d="M75 120 L230 120 L360 55 L520 55 M230 120 L360 185 L520 185 M230 120 L460 120" /></svg><div class="node node-origin"><span><Cpu :size="23" /></span><strong>YOUR GATEWAY</strong><small>127.0.0.1 / LOCAL</small></div><div class="node node-relay"><span><Radio :size="21" /></span><strong>VEIL RELAY</strong><small>ENCRYPTED</small></div><div class="node node-top"><span><BriefcaseBusiness :size="18" /></span><strong>BROKER</strong></div><div class="node node-target"><span><Globe :size="21" /></span><strong>{{ slot.active_contract ? 'TARGET NODE' : 'THE NETWORK' }}</strong></div><div class="node node-bank"><span><Landmark :size="18" /></span><strong>CIPHER BANK</strong></div><div class="map-caption"><span class="live-dot"></span>{{ slot.active_contract ? `CONNECTED TO ${slot.active_contract.target}` : 'NO ACTIVE REMOTE CONNECTION' }}</div></div><div class="panel-bottom"><ShieldCheck :size="14" />{{ slot.active_contract ? 'Remote session in progress. Monitor your trace.' : 'Your gateway is secure. All systems operational.' }}<button @click="page = slot.active_contract ? 'terminal' : 'gateway'">{{ slot.active_contract ? 'Open terminal' : 'View gateway' }} <ArrowUpRight :size="14" /></button></div></section><section class="panel briefing"><div class="panel-title"><span><Terminal :size="16" /> RUNNER BRIEFING</span><span class="panel-meta">READ ME</span></div><div class="briefing-body"><span class="micro">// A MESSAGE FROM THE BROKER</span><h2>Small footprints.<br> Big opportunities.</h2><p>Only jobs within one rank of your clearance reach your inbox. Finish clean, get paid, and move up.</p><button class="text-link" @click="page = 'broker'">Browse available contracts <ArrowRight :size="15" /></button><div class="briefing-info"><Activity :size="17" /><span>{{ slot.contracts.length }} contracts match your clearance.</span></div></div></section></div>
-            <section class="panel"><div class="panel-title"><span><BriefcaseBusiness :size="16" /> AVAILABLE CONTRACTS</span><button class="text-link small" @click="page = 'broker'">View all <ArrowUpRight :size="14" /></button></div><div class="contract-row" v-for="contract in slot.contracts.slice(0,2)" :key="contract.id"><span class="contract-icon"><BriefcaseBusiness :size="18" /></span><div class="contract-row-title"><strong>{{ contract.title }}</strong><small>{{ contract.client }} <span>/ {{ contract.target }}</span></small></div><span class="badge">{{ ranks[contract.rank] }}</span><strong class="reward">{{ money(contract.reward) }} <small>CPH</small></strong><button class="icon-button" @click="page = 'broker'" :aria-label="`View ${contract.title}`"><ArrowUpRight :size="18" /></button></div></section>
+            <div class="eyebrow"><span class="live-dot"></span> PERSONAL DESKTOP / SLOT 0{{ slot.position }}</div>
+            <div class="page-heading"><div><h1>Welcome back, {{ slot.alias }}<span>_</span></h1><p>Your gateway is online. What you do with it is up to you.</p></div><button class="button secondary" @click="page = 'launcher'">Application launcher <Grid2X2 :size="16" /></button></div>
+            <section class="stats-grid"><article class="stat-card"><div class="stat-label">AVAILABLE BALANCE <Landmark :size="17" /></div><div class="stat-value">{{ money(slot.balance) }} <span>CPH</span></div><div class="stat-foot"><span class="green-dot"></span>Compute time and route leases cost CPH</div></article><article class="stat-card"><div class="stat-label">RUNNER RANK <ShieldCheck :size="17" /></div><div class="stat-value rank-value">{{ slot.rank_name }} <span>0{{ slot.rank + 1 }}</span></div><div class="stat-foot">{{ slot.reputation }} REP <span class="mini-progress"><i :style="{ width: `${progress}%` }"></i></span><span>{{ slot.next_rank_at || 'MAX' }}</span></div></article><article class="stat-card"><div class="stat-label">MEMORY ALLOCATION <Cpu :size="17" /></div><div class="stat-value">{{ slot.ram_used }} <span>/ {{ slot.equipment.memory.ram }} GB</span></div><div class="stat-foot">{{ slot.running_apps.length }} processes / {{ slot.completed }} contracts completed</div></article></section>
+            <div class="desktop-grid"><section class="panel machine-panel"><div class="panel-title"><span><Cpu :size="16" /> YOUR MACHINE</span><span class="panel-meta">{{ slot.equipment.gateway.name.toUpperCase() }}</span></div><div class="machine-visual"><div class="machine-orbit"></div><Cpu :size="65" :stroke-width="1" /><span>{{ slot.equipment.gateway.name }}</span><small>{{ slot.equipment.gateway.hops }} PROXY HOPS / {{ slot.equipment.gateway.stealth }} STEALTH</small></div><div class="machine-components"><div v-for="(item, kind) in slot.equipment" :key="kind"><span>{{ kind.toUpperCase() }}</span><strong>{{ item.name }}</strong></div></div></section><section class="panel desktop-brief"><div class="panel-title"><span><BriefcaseBusiness :size="16" /> ASSIGNMENT DESK</span><span class="panel-meta">{{ slot.active_contract ? 'RESERVED' : 'NO ASSIGNMENT' }}</span></div><div class="briefing-body"><span class="micro">{{ slot.active_contract ? `CONTRACT ${slot.active_contract.id}` : '// INDEPENDENT OPERATOR' }}</span><h2>{{ slot.active_contract?.title || 'No handrails.\nNo shortcuts.' }}</h2><p>{{ slot.active_contract?.description || 'The broker supplies objectives. Your applications supply capabilities. You choose the tools, the route, and the risk.' }}</p><div v-if="slot.active_contract" class="brief-target">{{ slot.active_contract.target }}</div><div class="desk-facts"><span>{{ slot.installed_software.length }} TOOL LICENSES</span><span>{{ slot.proxy_route.length }} COMMITTED PROXIES</span><span>{{ slot.contracts.filter(job => !cooled(job)).length }} AVAILABLE JOBS</span></div></div></section></div>
+            <section class="panel recovery-panel"><div><span class="micro">RUNNER RECOVERY</span><p>New jobs return over time. Sell spare equipment if funds are tight. Restarting erases this slot's progress and restores starter funding.</p></div><button class="text-link danger-text" @click="restartConfirmation = ''; restartOpen = true">Restart this runner</button></section>
           </template>
-
+          <AppLauncher v-else-if="page === 'launcher'" :slot="slot" :busy="busy" @launch="launchApplication" @close="closeApplication" />
+          <NetworkMap v-else-if="page === 'atlas'" :slot="slot" :busy="busy" @save="saveRoute" />
+          <ExchangeView v-else-if="page === 'exchange'" :slot="slot" :busy="busy" @trade="trade" />
           <template v-else-if="page === 'broker'">
-            <div class="eyebrow">SERVICES / CONTRACT BROKER</div><div class="page-heading"><div><h1>Opportunity is encrypted<span>_</span></h1><p>Take the job. Complete the objective. Leave no trace.</p></div><span class="badge">CLEARANCE: {{ slot.rank_name.toUpperCase() }} ± 1</span></div><div class="info-banner"><ShieldCheck :size="18" /><span>Showing ranks {{ ranks[Math.max(0, slot.rank - 1)] }} through {{ ranks[Math.min(4, slot.rank + 1)] }}. Abandoned or traced contracts cost 60 reputation.</span></div><div class="contract-grid"><article class="panel contract-card" v-for="contract in slot.contracts" :key="contract.id"><div class="contract-card-top"><span class="micro">NR-{{ contract.id.replace('-', '0') }}</span><span :class="['badge', { elevated: contract.rank > slot.rank }]">{{ ranks[contract.rank] }}</span></div><BriefcaseBusiness :size="25" class="contract-glyph" /><h2>{{ contract.title }}</h2><span class="micro">{{ contract.client.toUpperCase() }}</span><p>{{ contract.description }}</p><div class="contract-spec"><span>System power required</span><strong :class="{ 'danger-text': power < 3 + contract.rank * 2 }">{{ 3 + contract.rank * 2 }} / yours {{ power }}</strong></div><div class="contract-spec"><span>Reputation</span><strong>+{{ contract.reputation }} REP</strong></div><div class="contract-card-bottom"><strong class="reward">{{ money(contract.reward) }} <small>CPH</small></strong><button class="button secondary" :disabled="busy || !!slot.active_contract || power < 3 + contract.rank * 2" @click="acceptContract(contract)">Accept job <ArrowUpRight :size="15" /></button></div><small v-if="power < 3 + contract.rank * 2" class="field-hint">Upgrade your gateway to meet the power requirement.</small></article></div><button v-if="slot.active_contract" class="button primary" @click="page = 'terminal'">Return to active contract <ArrowRight :size="16" /></button>
+            <div class="eyebrow">SERVICES / CONTRACT BROKER</div><div class="page-heading"><div><h1>Objectives. Nothing more<span>_</span></h1><p>Briefs disclose the target and desired result. Reservations and deliveries belong in your local shell.</p></div><span class="badge">{{ slot.rank_name.toUpperCase() }} ± 1</span></div>
+            <div class="broker-policy"><span>SUCCESS: +REPUTATION / PAYMENT / 5m REPLACEMENT</span><span>FAILURE: −60 REP / JOB-BASED FINE / 10m REPLACEMENT</span></div>
+            <div class="contract-grid"><article class="panel contract-card" v-for="job in slot.contracts" :key="job.id" :data-contract="job.id"><div class="contract-card-top"><span class="micro">CONTRACT {{ job.id }}</span><span class="badge">{{ slot.active_contract?.id === job.id ? 'RESERVED' : cooled(job) ? `SOURCING / ${cooldown(job)}s` : ranks[job.rank] }}</span></div><BriefcaseBusiness :size="25" class="contract-glyph" /><h2>{{ job.title }}</h2><span class="micro">{{ job.client.toUpperCase() }}</span><p>{{ job.description }}</p><dl class="job-details"><div><dt>TARGET</dt><dd>{{ job.target }}</dd></div><div><dt>ARTIFACT</dt><dd>{{ job.file }}</dd></div><div><dt>OBJECTIVE</dt><dd>{{ job.objective.toUpperCase() }}</dd></div><div><dt>SECURITY</dt><dd>CLASS {{ job.security }}</dd></div><div><dt>FAILURE LIABILITY</dt><dd>UP TO {{ 90 + job.rank * 80 }} CPH</dd></div></dl><div class="contract-card-bottom"><strong class="reward">{{ money(job.reward) }} <small>CPH</small></strong><span class="micro">+{{ job.reputation }} REPUTATION</span></div></article></div>
           </template>
-
-          <template v-else-if="page === 'terminal'">
-            <div class="eyebrow">OPERATIONS / REMOTE TERMINAL</div><div class="page-heading"><div><h1>Follow the signal<span>_</span></h1><p>{{ slot.active_contract ? slot.active_contract.title : 'No active remote connection.' }}</p></div><span v-if="slot.active_contract" :class="['badge', { elevated: remaining < 30 }]">TRACE WINDOW {{ remaining }}s</span></div><section class="panel terminal-panel"><div class="panel-title"><span><Terminal :size="16" /> {{ slot.active_contract?.target || 'LOCAL GATEWAY' }}</span><span class="panel-meta">SIMULATED NETWORK</span></div><div class="terminal-log" ref="logEl" role="log" aria-label="Mission output"><div class="terminal-banner">NETRUNNER REMOTE ACCESS PROTOCOL [v0.1]<br>Authorized simulation environment. All targets are fictional.<br>─────────────────────────────────────────────────────</div><div v-if="!slot.mission_log.length" class="terminal-muted">No connection established. Accept a contract through the broker.</div><pre v-for="(line, i) in slot.mission_log" :key="i">{{ line }}</pre><span v-if="slot.active_contract" class="terminal-cursor">█</span></div><form v-if="slot.active_contract" class="command-line" @submit.prevent="sendCommand()"><label for="command">{{ slot.alias }}@remote:~$</label><input id="command" v-model="commandText" placeholder="Type help for commands" autocomplete="off" spellcheck="false" maxlength="100" :disabled="busy" /><button class="icon-button" :disabled="busy || !commandText.trim()" aria-label="Execute command"><ArrowRight :size="18" /></button></form><div v-else class="terminal-empty-action"><button class="button secondary" @click="page = 'broker'">Connect through broker <ArrowUpRight :size="15" /></button></div></section><div v-if="slot.active_contract" class="terminal-toolbar"><span>NEXT COMMAND <button class="command-chip" @click="commandText = suggested">{{ suggested }}</button></span><button class="text-link danger-text" :disabled="busy" @click="sendCommand('abort')">Abort contract (−60 REP) <X :size="15" /></button></div><div class="terminal-help"><span v-for="(cmd, i) in ['scan', 'breach', 'extract', 'wipe', 'disconnect']" :key="cmd" :class="{ done: slot.mission_step > i }"><Check v-if="slot.mission_step > i" :size="13" /><span v-else>0{{ i + 1 }}</span>{{ cmd }}</span></div>
+          <template v-else-if="page === 'console' && currentProcess">
+            <div class="eyebrow">OPERATIONS / {{ activeConsole.toUpperCase() }}</div><div class="page-heading"><div><h1>{{ currentProcess.name }}<span>_</span></h1><p>{{ currentProcess.ram }} GB allocated. Commands execute inside this application's console.</p></div><span class="badge">{{ slot.connected ? 'REMOTE SESSION' : 'LOCAL SESSION' }}</span></div>
+            <TerminalConsole :slot="slot" :application="activeConsole" :busy="busy" :send="sendCommand" />
           </template>
-
-          <template v-else-if="page === 'gateway'">
-            <div class="eyebrow">HARDWARE / PERSONAL GATEWAY</div><div class="page-heading"><div><h1>Your edge in the network<span>_</span></h1><p>Invest in the machine that keeps you one step ahead.</p></div><span class="badge">SYSTEM POWER {{ power }} / 15</span></div><div class="info-banner"><Cpu :size="18" /><span>Every upgrade adds one system power. Higher-rank targets require more power. Equipment cannot change during a contract.</span></div><div class="upgrade-grid"><section class="panel upgrade-card" v-for="(item, kind) in slot.upgrades" :key="kind"><div class="panel-title"><span>{{ item.name.toUpperCase() }}</span><span class="panel-meta">LVL 0{{ item.level }}</span></div><div class="upgrade-body"><div class="hardware-art"><component :is="kind === 'hardware' ? Cpu : kind === 'gateway' ? HardDrive : Code2" :size="54" :stroke-width="1" /></div><span class="micro">{{ item.model }}</span><h2>{{ item.name }} MK.{{ item.level }}</h2><p>{{ item.description }}</p><div class="level-blocks"><i v-for="n in 5" :key="n" :class="{ filled: n <= item.level }"></i></div><div class="upgrade-price"><span>NEXT UPGRADE</span><strong>{{ item.level === 5 ? 'MAX LEVEL' : `${money(item.price)} CPH` }}</strong></div><button class="button secondary wide" :disabled="busy || !!slot.active_contract || item.level === 5 || slot.balance < item.price" @click="buyUpgrade(kind)">{{ item.level === 5 ? 'Fully upgraded' : slot.balance < item.price ? 'Insufficient funds' : 'Install upgrade' }}<Zap :size="16" /></button></div></section></div>
-          </template>
-
           <template v-else-if="page === 'bank'">
-            <div class="eyebrow">SERVICES / CIPHER BANK TERMINAL</div><div class="page-heading"><div><h1>Your money. Off the grid<span>_</span></h1><p>A separate ledger for every runner. All transactions recorded automatically.</p></div><span class="badge"><LockKeyhole :size="12" /> PRIVATE LEDGER</span></div><section class="bank-hero"><div><span class="micro">CIPHER // CURRENT ACCOUNT</span><h2>{{ money(slot.balance) }} <span>CPH</span></h2><p>Available balance</p></div><div class="bank-account"><Landmark :size="32" :stroke-width="1" /><span>ACCOUNT HOLDER</span><strong>{{ slot.alias }}</strong><small>NR-{{ String(slot.id).padStart(8,'0') }} / SLOT 0{{ slot.position }}</small></div></section><section class="panel ledger"><div class="panel-title"><span><Activity :size="16" /> TRANSACTION HISTORY</span><span class="panel-meta">LATEST 30 ENTRIES</span></div><div class="ledger-header"><span>TRANSACTION</span><span>DATE / UTC</span><span>AMOUNT</span></div><div class="ledger-row" v-for="entry in slot.ledger" :key="entry.id"><div><span class="transaction-icon"><component :is="entry.amount > 0 ? ArrowRight : ArrowUpRight" :size="16" /></span><strong>{{ entry.description }}</strong></div><time>{{ new Date(entry.created_at).toISOString().slice(0,16).replace('T',' ') }}</time><strong :class="entry.amount > 0 ? 'positive' : 'negative'">{{ entry.amount > 0 ? '+' : '−' }}{{ money(Math.abs(entry.amount)) }} <small>CPH</small></strong></div></section>
+            <div class="eyebrow">SERVICES / CIPHER BANK TERMINAL</div><div class="page-heading"><div><h1>Your money. Off the grid<span>_</span></h1><p>Every route, compute charge, trade, and contract payment has a receipt.</p></div><span class="badge"><LockKeyhole :size="12" /> PRIVATE LEDGER</span></div><section class="bank-hero"><div><span class="micro">CIPHER // CURRENT ACCOUNT</span><h2>{{ money(slot.balance) }} <span>CPH</span></h2><p>Available balance</p></div><div class="bank-account"><Landmark :size="32" :stroke-width="1" /><span>ACCOUNT HOLDER</span><strong>{{ slot.alias }}</strong><small>NR-{{ String(slot.id).padStart(8,'0') }} / SLOT 0{{ slot.position }}</small></div></section>
+            <TerminalConsole :slot="slot" application="bank" :busy="busy" :send="sendCommand" />
+            <section class="panel ledger bank-ledger"><div class="panel-title"><span><Activity :size="16" /> TRANSACTION HISTORY</span><span class="panel-meta">LATEST 30 ENTRIES</span></div><div class="ledger-row" v-for="entry in slot.ledger" :key="entry.id"><div><span class="transaction-icon"><ArrowUpRight :size="16" /></span><strong>{{ entry.description }}</strong></div><time>{{ new Date(entry.created_at).toISOString().slice(0,16).replace('T',' ') }}</time><strong :class="entry.amount > 0 ? 'positive' : 'negative'">{{ entry.amount > 0 ? '+' : '−' }}{{ money(Math.abs(entry.amount)) }} <small>CPH</small></strong></div></section>
           </template>
+          <div v-if="restartOpen" class="modal-backdrop" @click.self="restartOpen = false"><section class="panel restart-dialog" role="dialog" aria-modal="true" aria-labelledby="restart-title"><div class="panel-title"><span>RUNNER RESTART</span><button class="icon-button" @click="restartOpen = false" aria-label="Cancel restart"><X :size="17" /></button></div><form @submit.prevent="restartRunner"><h2 id="restart-title">Start over in slot 0{{ slot.position }}?</h2><p>This erases {{ slot.alias }}'s balance, reputation, contracts, equipment, routes, and transaction history. Your account and other save slots stay intact.</p><label for="restart-confirmation">TYPE {{ slot.alias }} TO CONFIRM</label><input id="restart-confirmation" v-model="restartConfirmation" autocomplete="off" required /><div class="dialog-actions"><button type="button" class="button secondary" @click="restartOpen = false">Cancel</button><button class="button primary" :disabled="busy || restartConfirmation !== slot.alias">Erase progress and restart</button></div></form></section></div>
         </template>
         <footer><span>NETRUNNER <span class="footer-slash">/</span> A WORLD BEHIND THE FIREWALL</span><span>FICTIONAL NETWORK. INDEPENDENT OPERATORS.<span class="green-dot"></span></span></footer>
       </main>

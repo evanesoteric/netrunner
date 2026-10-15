@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.py[cod]
+.env
+.local/
+frontend/node_modules/
+frontend/dist/
+playwright-report/
+test-results/

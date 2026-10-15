@@ -1,7 +1,7 @@
 from django.conf import settings
 from django.db import models
 from django.db.models import Q
-from .catalog import rank_for, STARTER_EQUIPMENT, STARTER_SOFTWARE
+from .catalog import rank_for, STARTER_EQUIPMENT, STARTER_SOFTWARE, STARTER_ATLAS_NODES
 
 
 def starter_equipment():
@@ -16,6 +16,10 @@ def starter_software():
     return list(STARTER_SOFTWARE)
 
 
+def starter_atlas_nodes():
+    return list(STARTER_ATLAS_NODES)
+
+
 class SaveSlot(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     position = models.PositiveSmallIntegerField()
@@ -27,6 +31,7 @@ class SaveSlot(models.Model):
     installed_software = models.JSONField(default=starter_software)
     running_apps = models.JSONField(default=dict)
     proxy_route = models.JSONField(default=list)
+    atlas_nodes = models.JSONField(default=starter_atlas_nodes)
     mission_state = models.JSONField(default=dict)
     contract_cooldowns = models.JSONField(default=dict)
     completed = models.PositiveIntegerField(default=0)

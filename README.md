@@ -2,13 +2,25 @@
 
 A browser-based hacker game inspired by the atmosphere of Uplink. Django 5.2 and PostgreSQL 17 own the game state; Vue 3 and Vite power the interface. Hacking takes place entirely inside a fictional, simulated network.
 
-## v0.2 — operator desktop
+## v0.3 — sidebar services and server directory
+
+Cipher bank, the contract broker, and Atlas are available directly from the left sidebar, including on mobile. These shortcuts launch/open the same applications and respect their existing RAM requirements.
+
+Atlas routes chain **individual named servers**, such as `Intel Corp: Public Access → MilTech Research Center → NY Public Library Terminal`. Each server has its own fictional address, organization, category, clearance, fee, and trace delay; geography remains a secondary map coordinate.
+
+Use **Atlas → Network directory** to search the 12 listed servers and filter by server type or saved entries. **Add to Atlas** saves a server in the current runner's personal directory and makes it visible on their routing map. **Remove from Atlas** removes that bookmark and prunes the server from their committed proxy chain while preserving the remaining hop order. Directory changes save immediately; routing changes still use **Commit route**. Live remote connections lock directory and route edits. Bookmarking a restricted server does not bypass its proxy clearance.
+
+New runners start with Intel, MilTech, NY Library, and Northstar University in Atlas. Migration `0003_atlas_server_directory` preserves all 12 previously visible nodes for existing saves, along with committed routes, route costs, balances, and live sessions. Restarting a slot restores the new four-server starter directory.
+
+Back up the database, pull `main`, and rebuild as shown below. Django applies the migrations automatically.
+
+## Operator desktop
 
 - **Persistent terminal focus:** Enter and button submissions keep the command input focused, including failed requests. Up/Down recalls command history. Output can still be selected, and Tab can leave the terminal.
-- **Independent launchers:** the top bar launches the local terminal; the application launcher starts Atlas, the broker, the exchange, Cipher bank, and each installed tool. Running processes have their own consoles and share your machine's RAM. Closing a window does not disconnect a remote session.
+- **Independent launchers:** the top bar launches the local terminal; the sidebar opens Atlas, the broker, and Cipher bank; the application launcher also starts the exchange and each installed tool. Running processes have their own consoles and share your machine's RAM. Closing a window does not disconnect a remote session.
 - **Custom machines:** 40 named hardware products across five tiers: two processors, gateways, memory modules, and drives per tier. Hardware purchases enter inventory and must be fitted. Spare components can be sold at half price.
 - **Specialized software:** 50 individual licenses: Cartograph network mappers, Lockpick authentication crackers, Rosetta decryptors, Ashfall log cleaners, and Tripwire trace monitors. Each has five capability classes and Pro/Micro variants. Micro trades speed for lower memory use. Purchased tools must be launched separately.
-- **World routing:** Atlas contains 12 fictional relay locations. Select an ordered proxy chain, reorder/remove hops, and commit it. The route is drawn from your home gateway through the proxies to the reserved target. Pan and zoom the map or use the accessible relay directory. Routes remain committed across sessions.
+- **World routing:** Atlas contains named fictional servers at 12 map locations. Select an ordered proxy chain, reorder/remove hops, and commit it. The route is drawn from your home gateway through the proxies to the reserved target. Pan and zoom the map or use the accessible saved-server list. Routes remain committed across sessions.
 - **Manual contracts:** reserve and submit assignments through the local shell. The broker publishes target, artifact, objective, clearance, and reward. There are retrieval, encrypted recovery, and deletion jobs at each rank.
 - **An economy with consequences:** routing leases and tool computation consume Cipher (CPH). Failed jobs cost up to `90 + 80 × job rank` CPH and 60 reputation (both balances floor at zero). Completed jobs return after five minutes; failed ones after ten, using server time. A bankrupt runner can sell spare equipment or explicitly restart that slot by typing their alias.
 
@@ -32,12 +44,12 @@ The trace begins when the player connects, not when reserving a contract. Wall-c
 
 Every mutation checks authentication, CSRF, save ownership, and current game state. PostgreSQL row locks protect financial updates and mission completion from concurrent/replayed requests. The test suite exercises both concurrent payment and purchase requests.
 
-### Upgrade an existing v0.1 installation
+### Upgrade an existing installation
 
 Back up your database first. With the old Docker stack running:
 
 ```bash
-docker compose exec -T db pg_dump -U netrunner netrunner > ../netrunner-before-v0.2.sql
+docker compose exec -T db pg_dump -U netrunner netrunner > ../netrunner-before-v0.3.sql
 ```
 
 Then pull and rebuild:
@@ -47,7 +59,7 @@ git pull --ff-only origin main
 docker compose up --build
 ```
 
-Django automatically applies migration `0002_runner_desktop`. Existing balances, reputation, completed contracts, saves, and ledger entries are preserved. Old hardware/gateway levels map to named components; old software levels map to appropriate tool licenses. An active v0.1 session is safely closed without a fine or reputation loss. Newly launched applications start from the desktop. Back up before rolling versions back: the old schema cannot represent the new loadout and process state.
+Django automatically applies pending migrations, including `0002_runner_desktop` and `0003_atlas_server_directory`. Existing balances, reputation, completed contracts, saves, and ledger entries are preserved. Old hardware/gateway levels map to named components; old software levels map to appropriate tool licenses. An active v0.1 session is safely closed without a fine or reputation loss. Newly launched applications start from the desktop. Back up before rolling versions back: the old schema cannot represent the new loadout and process state.
 
 ## Download and run on your computer
 
@@ -113,11 +125,11 @@ source scripts/local-db.sh
 ## Project map
 
 - `backend/game/models.py`: save slots, owned products, running processes, routes, mission state, and ledger.
-- `backend/game/catalog.py`: named products, relays, currency, jobs, ranks, and cooldowns.
+- `backend/game/catalog.py`: named products, servers, currency, jobs, ranks, and cooldowns.
 - `backend/game/mechanics.py`: deterministic command simulation, routing, compute costs, traces, trade, and contract evidence.
 - `backend/game/views.py`: authentication and transactional game API.
 - `frontend/src/components/TerminalConsole.vue`: focus, command input, per-app history and output.
-- `frontend/src/components/NetworkMap.vue`: world map, pan/zoom, ordered proxy editor and relay directory.
+- `frontend/src/components/NetworkMap.vue`: world map, pan/zoom, ordered proxy editor and personal server directory.
 - `frontend/src/components/AppLauncher.vue`: system applications and installed software.
 - `frontend/src/components/ExchangeView.vue`: individual product inventory and trading.
 - `scripts/`: setup, database, startup, and validation commands.

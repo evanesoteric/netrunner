@@ -51,7 +51,7 @@ STARTER_EQUIPMENT = {kind: f'{kind}-1-standard' for kind in FAMILIES}
 STARTER_SOFTWARE = ['mapper-1-standard', 'cracker-1-standard', 'cleaner-1-standard']
 BUILTIN_APPS = {
     'terminal': {'id': 'terminal', 'name': 'Local terminal', 'description': 'Shell, broker reservations, remote file access, and deliveries.', 'ram': 1, 'console': True},
-    'atlas': {'id': 'atlas', 'name': 'Atlas routing desk', 'description': 'Build an ordered proxy chain across the world.', 'ram': 1, 'console': False},
+    'atlas': {'id': 'atlas', 'name': 'Atlas routing desk', 'description': 'Manage your server directory and build an ordered proxy chain.', 'ram': 1, 'console': False},
     'broker': {'id': 'broker', 'name': 'Contract broker', 'description': 'Read briefs, target addresses, clearance, and availability.', 'ram': 0, 'console': False},
     'market': {'id': 'market', 'name': 'Hardware & software exchange', 'description': 'Choose individual components and tool licenses.', 'ram': 0, 'console': False},
     'bank': {'id': 'bank', 'name': 'Cipher bank', 'description': 'Your separate account terminal and ledger.', 'ram': 0, 'console': True},
@@ -71,6 +71,25 @@ RELAYS = [
     {'id': 'anchorage', 'name': 'Anchorage', 'operator': 'Polar relay', 'x': 160, 'y': 110, 'delay': 48, 'latency': 19, 'fee': 18, 'rank': 2},
     {'id': 'helsinki', 'name': 'Helsinki', 'operator': 'White noise', 'x': 540, 'y': 110, 'delay': 52, 'latency': 16, 'fee': 20, 'rank': 3},
 ]
+# Stable IDs preserve existing routes while the player sees individual servers.
+SERVER_IDENTITIES = {
+    'new-york': ('NY Public Library Terminal', 'NY Public Library', 'library-ny.internal', 'Public', 'New York', 'NY LIBRARY'),
+    'reykjavik': ('Northstar University: Alumni Gateway', 'Northstar University', 'northstar-alumni.internal', 'Academic', 'Reykjavik', 'NORTHSTAR U.'),
+    'london': ('Intel Corp: Public Access', 'Intel Corp', 'intel-public.internal', 'Corporate', 'London', 'INTEL PUBLIC'),
+    'berlin': ('MilTech Research Center', 'MilTech', 'miltech-research.internal', 'Research', 'Berlin', 'MILTECH R&D'),
+    'sao-paulo': ('Verde Financial: Public Gateway', 'Verde Financial', 'verde-gateway.internal', 'Financial', 'São Paulo', 'VERDE FIN.'),
+    'cape-town': ('Cape Observatory Data Archive', 'Cape Observatory', 'cape-archive.internal', 'Research', 'Cape Town', 'CAPE ARCHIVE'),
+    'mumbai': ('Helios Shipping: Logistics Server', 'Helios Shipping', 'helios-logistics.internal', 'Corporate', 'Mumbai', 'HELIOS LOG.'),
+    'singapore': ('Straits Exchange: Market Feed', 'Straits Exchange', 'straits-feed.internal', 'Financial', 'Singapore', 'STRAITS EXCH.'),
+    'tokyo': ('Shinsei Robotics: Visitor System', 'Shinsei Robotics', 'shinsei-visitor.internal', 'Corporate', 'Tokyo', 'SHINSEI VISITOR'),
+    'sydney': ('Southern Cross University Mainframe', 'Southern Cross University', 'southern-cross.internal', 'Academic', 'Sydney', 'SOUTHERN CROSS'),
+    'anchorage': ('PolarNet Satellite Control', 'PolarNet', 'polarnet-control.internal', 'Infrastructure', 'Anchorage', 'POLARNET CTRL'),
+    'helsinki': ('White Noise Systems: Secure Relay', 'White Noise Systems', 'white-noise.internal', 'Infrastructure', 'Helsinki', 'WHITE NOISE'),
+}
+for server in RELAYS:
+    name, operator, address, category, location, short_name = SERVER_IDENTITIES[server['id']]
+    server.update(name=name, operator=operator, address=address, category=category, location=location, short_name=short_name)
+STARTER_ATLAS_NODES = ['london', 'berlin', 'new-york', 'reykjavik']
 RELAY_BY_ID = {node['id']: node for node in RELAYS}
 HOME_NODE = {'name': 'Your gateway', 'x': 196, 'y': 205}
 CONTRACTS = []

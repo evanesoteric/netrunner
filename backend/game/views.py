@@ -9,7 +9,7 @@ from django.utils import timezone
 from django.views.decorators.csrf import ensure_csrf_cookie
 from .models import SaveSlot, LedgerEntry
 from .catalog import CONTRACTS, CONTRACT_BY_ID, CURRENCY, RANKS, THRESHOLDS, PRODUCTS, BUILTIN_APPS, RELAYS, HOME_NODE
-from .mechanics import GameError, hardware, ram_used, route_stats, available_at, trace_remaining, settle, launch, trade, validate_route, execute
+from .mechanics import GameError, hardware, ram_used, route_stats, available_at, trace_remaining, settle, launch, trade, validate_route, execute, edit_directory
 
 def api(methods, authenticated=True):
     def decorate(fn):
@@ -73,7 +73,7 @@ def serialize(slot, detailed=False):
                 'console': BUILTIN_APPS[value]['console'] if value in BUILTIN_APPS else True,
             } for key, value in slot.running_apps.items()],
             'ram_used': ram_used(slot), 'catalog': list(PRODUCTS.values()),
-            'builtins': list(BUILTIN_APPS.values()), 'relays': RELAYS, 'home_node': HOME_NODE,
+            'builtins': list(BUILTIN_APPS.values()), 'relays': [server for server in RELAYS if server['id'] in slot.atlas_nodes], 'network_directory': RELAYS, 'atlas_nodes': slot.atlas_nodes, 'home_node': HOME_NODE,
             'proxy_route': slot.proxy_route, 'route_stats': route_stats(slot),
             'ledger': list(slot.ledger.values('id', 'amount', 'description', 'created_at')[:30]),
         })
@@ -82,7 +82,7 @@ def serialize(slot, detailed=False):
 @ensure_csrf_cookie
 @api(['GET'], authenticated=False)
 def session(request):
-    return JsonResponse({'user': {'username': request.user.username} if request.user.is_authenticated else None, 'currency': CURRENCY, 'ranks': RANKS, 'version': '0.2.0', 'server_time': timezone.now().isoformat()})
+    return JsonResponse({'user': {'username': request.user.username} if request.user.is_authenticated else None, 'currency': CURRENCY, 'ranks': RANKS, 'version': '0.3.0', 'server_time': timezone.now().isoformat()})
 
 @api(['POST'], authenticated=False)
 def register(request):
@@ -203,12 +203,22 @@ def route(request, slot_id):
 
 @api(['POST'])
 @transaction.atomic
+def directory(request, slot_id):
+    slot = SaveSlot.objects.select_for_update().get(pk=slot_id, user=request.user)
+    settle(slot)
+    edit_directory(slot, request.data.get('action'), request.data.get('server_id'))
+    slot.save()
+    return JsonResponse(serialize(slot, True))
+
+
+@api(['POST'])
+@transaction.atomic
 def restart(request, slot_id):
     slot = SaveSlot.objects.select_for_update().get(pk=slot_id, user=request.user)
     if request.data.get('confirmation') != slot.alias:
         raise GameError('Type the runner alias exactly to confirm restarting this slot.')
     fresh = SaveSlot(user=request.user, alias=slot.alias, position=slot.position)
-    for field in ['balance', 'reputation', 'completed', 'equipment', 'owned_hardware', 'installed_software', 'running_apps', 'proxy_route', 'active_contract', 'mission_started', 'mission_state', 'mission_log', 'contract_cooldowns']:
+    for field in ['balance', 'reputation', 'completed', 'equipment', 'owned_hardware', 'installed_software', 'running_apps', 'proxy_route', 'atlas_nodes', 'active_contract', 'mission_started', 'mission_state', 'mission_log', 'contract_cooldowns']:
         setattr(slot, field, getattr(fresh, field))
     slot.created_at = timezone.now()
     slot.save()

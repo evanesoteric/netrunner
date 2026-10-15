@@ -81,11 +81,28 @@ def validate_route(slot, route):
     if not isinstance(route, list) or any(not isinstance(key, str) for key in route):
         raise GameError('Route must be a list of relay IDs.')
     if len(route) != len(set(route)) or any(key not in RELAY_BY_ID for key in route):
-        raise GameError('Use distinct relays from Atlas.')
+        raise GameError('Use distinct servers from Atlas.')
+    if any(key not in slot.atlas_nodes for key in route):
+        raise GameError('Add each server to your Atlas directory before routing through it.')
     if len(route) > hardware(slot)['gateway']['hops']:
         raise GameError('This gateway cannot support that many proxy hops.')
     if any(RELAY_BY_ID[key]['rank'] > slot.rank for key in route):
-        raise GameError('A relay on this route exceeds your clearance.')
+        raise GameError('A server on this route exceeds your clearance.')
+
+
+def edit_directory(slot, action, server_id):
+    if slot.mission_started:
+        raise GameError('Disconnect before editing your Atlas directory.')
+    if not isinstance(server_id, str) or server_id not in RELAY_BY_ID:
+        raise GameError('Select a server from the network directory.')
+    if action == 'add':
+        if server_id not in slot.atlas_nodes:
+            slot.atlas_nodes = slot.atlas_nodes + [server_id]
+    elif action == 'remove':
+        slot.atlas_nodes = [key for key in slot.atlas_nodes if key != server_id]
+        slot.proxy_route = [key for key in slot.proxy_route if key != server_id]
+    else:
+        raise GameError('Choose add or remove.')
 
 
 def launch(slot, product_id):
@@ -277,7 +294,7 @@ def _shell(slot, verb, args, job):
     if verb == 'accept' and len(args) == 1:
         return reserve(slot, args[0])
     if verb == 'route' and not args:
-        return 'GATEWAY → ' + ' → '.join([RELAY_BY_ID[key]['name'] for key in slot.proxy_route] + ['TARGET']) + f'\nConnection lease: {route_stats(slot)["fee"]} CPH'
+        return 'GATEWAY → ' + ' → '.join([RELAY_BY_ID[key]['name'] + ' [' + RELAY_BY_ID[key]['address'] + ']' for key in slot.proxy_route] + ['TARGET']) + f'\nConnection lease: {route_stats(slot)["fee"]} CPH'
     if verb == 'status' and not args:
         return f'Balance: {slot.balance} CPH\nRAM: {ram_used(slot)}/{hardware(slot)["memory"]["ram"]} GB\nRemote: {job["target"] if job and slot.mission_started else "disconnected"}\nLocal archive: {job["file"] if job and state.get("recovered") else "empty"}'
     if not job:

@@ -97,7 +97,7 @@ class AccountTests(APIHelpers, TestCase):
         other = get_user_model().objects.create_user('other')
         foreign = SaveSlot.objects.create(user=other, position=1, alias='private')
         self.assertEqual(self.client.get(f'/api/slots/{foreign.id}/').status_code, 404)
-        for endpoint in ['applications', 'loadout', 'route', 'command', 'restart', 'accept', 'upgrade']:
+        for endpoint in ['applications', 'loadout', 'route', 'directory', 'command', 'restart', 'accept', 'upgrade']:
             self.post(f'slots/{foreign.id}/{endpoint}', {}, 404)
         self.client.logout()
         self.assertEqual(self.client.get('/api/slots/').status_code, 401)
@@ -163,11 +163,11 @@ class SimulationTests(APIHelpers, TestCase):
     def test_proxy_route_validation_order_latency_and_capacity(self):
         for nodes in [['london', 'london'], ['invented'], ['tokyo'], ['london', 'berlin', 'reykjavik', 'new-york']]:
             self.post(self.endpoint('route'), {'nodes': nodes}, 400)
-        response = self.post(self.endpoint('route'), {'nodes': ['new-york', 'london', 'sao-paulo']})
+        response = self.post(self.endpoint('route'), {'nodes': ['new-york', 'london', 'reykjavik']})
         first_latency = response['route_stats']['latency']
-        response = self.post(self.endpoint('route'), {'nodes': ['london', 'new-york', 'sao-paulo']})
+        response = self.post(self.endpoint('route'), {'nodes': ['london', 'new-york', 'reykjavik']})
         self.assertNotEqual(response['route_stats']['latency'], first_latency)
-        self.assertEqual(response['proxy_route'], ['london', 'new-york', 'sao-paulo'])
+        self.assertEqual(response['proxy_route'], ['london', 'new-york', 'reykjavik'])
 
     def test_route_is_charged_on_connection_and_locked_while_connected(self):
         self.post(self.endpoint('route'), {'nodes': ['new-york', 'london']})
@@ -361,6 +361,55 @@ class SimulationTests(APIHelpers, TestCase):
         self.post(self.endpoint('route'), {'nodes': []})
         self.post(self.endpoint('loadout'), {'action': 'equip', 'product_id': 'gateway-1-specialist'})
 
+    def test_atlas_has_named_saved_servers_and_full_network_directory(self):
+        result = self.refresh()
+        self.assertEqual(len(result['relays']), 4)
+        self.assertEqual(len(result['network_directory']), 12)
+        names = {server['name'] for server in result['relays']}
+        self.assertIn('Intel Corp: Public Access', names)
+        self.assertIn('MilTech Research Center', names)
+        self.assertIn('NY Public Library Terminal', names)
+        self.assertTrue(all(server['address'].endswith('.internal') for server in result['network_directory']))
+
+    def test_directory_add_is_idempotent_and_enables_routing(self):
+        self.post(self.endpoint('route'), {'nodes': ['sao-paulo']}, 400)
+        for _ in range(2):
+            result = self.post(self.endpoint('directory'), {'action': 'add', 'server_id': 'sao-paulo'})
+        self.assertEqual(result['atlas_nodes'].count('sao-paulo'), 1)
+        self.assertEqual(result['balance'], 1200)
+        self.post(self.endpoint('route'), {'nodes': ['sao-paulo']})
+
+    def test_removing_server_prunes_only_this_slots_route_and_directory(self):
+        other = SaveSlot.objects.create(user=self.user, position=2, alias='other', proxy_route=['london'])
+        self.post(self.endpoint('route'), {'nodes': ['london', 'berlin', 'new-york']})
+        result = self.post(self.endpoint('directory'), {'action': 'remove', 'server_id': 'berlin'})
+        self.assertEqual(result['proxy_route'], ['london', 'new-york'])
+        self.assertNotIn('berlin', result['atlas_nodes'])
+        self.assertNotIn('berlin', {server['id'] for server in result['relays']})
+        other.refresh_from_db()
+        self.assertIn('berlin', other.atlas_nodes)
+        self.assertEqual(other.proxy_route, ['london'])
+        self.reserve()
+        self.assertIn('Intel Corp: Public Access', self.log_text(self.cmd('route')))
+
+    def test_directory_changes_are_locked_during_remote_session(self):
+        self.post(self.endpoint('route'), {'nodes': ['london']})
+        self.scan_and_connect()
+        self.post(self.endpoint('directory'), {'action': 'remove', 'server_id': 'london'}, 400)
+        self.post(self.endpoint('directory'), {'action': 'add', 'server_id': 'sao-paulo'}, 400)
+        result = self.refresh()
+        self.assertEqual(result['proxy_route'], ['london'])
+        self.assertNotIn('sao-paulo', result['atlas_nodes'])
+
+    def test_bookmark_does_not_bypass_server_clearance(self):
+        self.post(self.endpoint('directory'), {'action': 'add', 'server_id': 'tokyo'})
+        self.post(self.endpoint('route'), {'nodes': ['tokyo']}, 400)
+
+    def test_invalid_directory_requests_do_not_change_atlas(self):
+        for payload in [{'action': 'add', 'server_id': 'unknown.internal'}, {'action': 'remove', 'server_id': []}, {'action': 'invent', 'server_id': 'london'}]:
+            self.post(self.endpoint('directory'), payload, 400)
+        self.assertEqual(len(self.refresh()['atlas_nodes']), 4)
+
     def test_restart_requires_alias_and_only_resets_selected_slot(self):
         other = SaveSlot.objects.create(user=self.user, position=2, alias='other', balance=800)
         self.scan_and_connect()
@@ -442,4 +491,27 @@ class LegacySaveMigrationTests(TransactionTestCase):
             self.assertEqual(updated.ledger.get().description, 'Preserved payment')
             self.assertEqual(updated.mission_log[0]['text'], 'Legacy session')
         finally:
-            MigrationExecutor(connection).migrate([('game', '0002_runner_desktop')])
+            restore = MigrationExecutor(connection)
+            restore.migrate(restore.loader.graph.leaf_nodes())
+
+
+class AtlasDirectoryMigrationTests(TransactionTestCase):
+    def test_v02_routes_and_live_sessions_keep_their_servers(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate([('game', '0002_runner_desktop')])
+        try:
+            old = executor.loader.project_state([('game', '0002_runner_desktop')]).apps
+            user = old.get_model('auth', 'User').objects.create(username='atlas-veteran')
+            started = timezone.now()
+            slot = old.get_model('game', 'SaveSlot').objects.create(user_id=user.pk, position=1, alias='veteran', balance=900, proxy_route=['sao-paulo', 'london'], active_contract='0-0', mission_started=started, mission_state={'trace_budget': 160})
+            executor = MigrationExecutor(connection)
+            executor.migrate([('game', '0003_atlas_server_directory')])
+            updated = executor.loader.project_state([('game', '0003_atlas_server_directory')]).apps.get_model('game', 'SaveSlot').objects.get(pk=slot.pk)
+            self.assertEqual(len(updated.atlas_nodes), 12)
+            self.assertEqual(updated.proxy_route, ['sao-paulo', 'london'])
+            self.assertEqual(updated.balance, 900)
+            self.assertEqual(updated.mission_started, started)
+            self.assertEqual(updated.mission_state, {'trace_budget': 160})
+        finally:
+            restore = MigrationExecutor(connection)
+            restore.migrate(restore.loader.graph.leaf_nodes())

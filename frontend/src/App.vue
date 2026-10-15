@@ -11,7 +11,14 @@ const authMode = ref('register'), username = ref(''), password = ref(''), alias 
 const ranks = ref([]), currency = ref({ name: 'Cipher', symbol: 'CPH' }), activeConsole = ref('terminal')
 const restartOpen = ref(false), restartConfirmation = ref(''), responseTime = ref(Date.now())
 let clock, poller, revision = 0, polling = false, serverOffset = 0
-const nav = [{ id: 'overview', label: 'Desktop', icon: Network }, { id: 'launcher', label: 'Applications', icon: Grid2X2 }, { id: 'saves', label: 'Save slots', icon: Layers3 }]
+const nav = [
+  { id: 'overview', label: 'Desktop', icon: Network },
+  { id: 'broker', label: 'Contract broker', icon: BriefcaseBusiness },
+  { id: 'bank', label: 'Cipher bank', icon: Landmark },
+  { id: 'atlas', label: 'Atlas network', icon: Globe },
+  { id: 'launcher', label: 'Applications', icon: Grid2X2 },
+  { id: 'saves', label: 'Save slots', icon: Layers3 },
+]
 const money = n => new Intl.NumberFormat('en-US').format(n ?? 0)
 const progress = computed(() => slot.value?.next_rank_at ? Math.min(100, (slot.value.reputation - slot.value.rank_floor) / (slot.value.next_rank_at - slot.value.rank_floor) * 100) : 100)
 const remaining = computed(() => slot.value?.trace_remaining == null ? null : Math.max(0, slot.value.trace_remaining - Math.floor((now.value - responseTime.value) / 1000)))
@@ -65,6 +72,13 @@ async function createSave() {
 async function logOut() {
   await act(async () => { await api('logout/', {}); revision++; user.value = null; slot.value = null; saves.value = []; page.value = 'overview' })
 }
+async function navigate(item) {
+  if (item.id === 'saves') return openSaves()
+  if (['broker', 'bank', 'atlas'].includes(item.id)) {
+    if (slot.value.running_apps.some(app => app.id === item.id)) activate(item.id)
+    else await launchApplication(item.id)
+  } else page.value = item.id
+}
 function activate(app) { activeConsole.value = app; page.value = ({ atlas: 'atlas', broker: 'broker', market: 'exchange', bank: 'bank' }[app] || 'console') }
 async function launchApplication(productId) {
   await act(async () => {
@@ -86,6 +100,12 @@ async function trade(action, productId) {
 }
 async function saveRoute(nodes) {
   await act(async () => { updateSlot(await api(`slots/${slot.value.id}/route/`, { nodes })); notice.value = 'Proxy chain committed. Connection leases are charged when dialing a target.' })
+}
+async function editDirectory(action, serverId) {
+  await act(async () => {
+    updateSlot(await api(`slots/${slot.value.id}/directory/`, { action, server_id: serverId }))
+    notice.value = action === 'add' ? 'Server added to your Atlas directory.' : 'Server removed from Atlas and the committed proxy chain.'
+  })
 }
 async function restartRunner() {
   await act(async () => { updateSlot(await api(`slots/${slot.value.id}/restart/`, { confirmation: restartConfirmation.value })); restartOpen.value = false; restartConfirmation.value = ''; page.value = 'overview'; notice.value = 'Runner restarted. This slot has a fresh machine and 1,200 CPH.'; await loadSaves() })
@@ -109,9 +129,9 @@ onUnmounted(() => { clearInterval(clock); clearInterval(poller) })
   <div class="app-shell">
     <aside class="sidebar">
       <a class="brand" href="#" @click.prevent="page = 'overview'" aria-label="Netrunner home"><span class="brand-icon"><Terminal :size="23" /></span><span>netrunner<span class="brand-dot">_</span><small>INDEPENDENT NETWORK ACCESS</small></span></a>
-      <div class="workspace-label">WORKSPACE <span>V.0.2</span></div>
+      <div class="workspace-label">WORKSPACE <span>V.0.3</span></div>
       <nav aria-label="Main navigation">
-        <button v-for="item in nav" :key="item.id" :aria-label="item.label" :class="['nav-item', { active: page === item.id }]" @click="item.id === 'saves' ? openSaves() : page = item.id" :disabled="!slot"><component :is="item.icon" :size="18" /><span>{{ item.label }}</span><span v-if="item.id === 'broker' && slot" class="nav-count">{{ slot.contracts.length }}</span><span v-if="item.id === 'terminal' && slot?.active_contract" class="live-dot"></span></button>
+        <button v-for="item in nav" :key="item.id" :aria-label="item.label" :class="['nav-item', { active: page === item.id }]" @click="navigate(item)" :disabled="!slot || busy" :aria-current="page === item.id ? 'page' : undefined"><component :is="item.icon" :size="18" /><span>{{ item.label }}</span><span v-if="item.id === 'broker' && slot" class="nav-count">{{ slot.contracts.length }}</span><span v-if="item.id === 'terminal' && slot?.active_contract" class="live-dot"></span></button>
       </nav>
       <div class="sidebar-note"><Radio :size="17" /><span>A quieter kind of power.<br><strong>Leave no trace.</strong></span></div>
       <button v-if="user" class="mobile-saves icon-button" @click="openSaves" aria-label="Manage save slots"><Layers3 :size="20" /></button>
@@ -127,7 +147,7 @@ onUnmounted(() => { clearInterval(clock); clearInterval(poller) })
       <main>
         <div v-if="error" class="message error" role="alert"><span>{{ error }}</span><button @click="error = ''" aria-label="Dismiss error"><X :size="16" /></button></div>
         <div v-if="notice" class="message success" role="status"><Check :size="16" />{{ notice }}</div>
-        <div v-if="loading" class="loading"><span class="live-dot"></span> ESTABLISHING SECURE CONNECTION…</div>
+        <div v-if="loading || (busy && user && !slot)" class="loading" role="status"><span class="live-dot"></span> ESTABLISHING SECURE CONNECTION…</div>
 
         <template v-else-if="!user">
           <div class="eyebrow"><span class="live-dot"></span> YOUR NEXT LIFE STARTS HERE</div>
@@ -154,7 +174,7 @@ onUnmounted(() => { clearInterval(clock); clearInterval(poller) })
             <section class="panel recovery-panel"><div><span class="micro">RUNNER RECOVERY</span><p>New jobs return over time. Sell spare equipment if funds are tight. Restarting erases this slot's progress and restores starter funding.</p></div><button class="text-link danger-text" @click="restartConfirmation = ''; restartOpen = true">Restart this runner</button></section>
           </template>
           <AppLauncher v-else-if="page === 'launcher'" :slot="slot" :busy="busy" @launch="launchApplication" @close="closeApplication" />
-          <NetworkMap v-else-if="page === 'atlas'" :slot="slot" :busy="busy" @save="saveRoute" />
+          <NetworkMap v-else-if="page === 'atlas'" :slot="slot" :busy="busy" @save="saveRoute" @directory="editDirectory" />
           <ExchangeView v-else-if="page === 'exchange'" :slot="slot" :busy="busy" @trade="trade" />
           <template v-else-if="page === 'broker'">
             <div class="eyebrow">SERVICES / CONTRACT BROKER</div><div class="page-heading"><div><h1>Objectives. Nothing more<span>_</span></h1><p>Briefs disclose the target and desired result. Reservations and deliveries belong in your local shell.</p></div><span class="badge">{{ slot.rank_name.toUpperCase() }} ± 1</span></div>

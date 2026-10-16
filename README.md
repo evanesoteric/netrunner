@@ -2,6 +2,56 @@
 
 A browser-based hacker game inspired by the atmosphere of Uplink. Django 5.2 and PostgreSQL 17 own the game state; Vue 3 and Vite power the interface. Hacking takes place entirely inside a fictional, simulated network.
 
+## v0.6 — generated world content and the hidden market
+
+### Offline development administration
+
+`generate_content` is a local Django management command, available only with `DJANGO_DEBUG=1`. It has no web endpoint and needs no external service. After the initial fresh build, PostgreSQL must be running and migrated; the backend web server may be stopped while you author content.
+
+PowerShell:
+
+```powershell
+docker compose stop backend
+.\scripts\generate-content.ps1 missions --count 5 --rank 0
+.\scripts\generate-content.ps1 missions --count 2 --rank 1 --objective retrieve --encrypted
+.\scripts\generate-content.ps1 servers --count 5 --rank 0
+.\scripts\generate-content.ps1 servers --count 4 --rank 0 --exploitable
+docker compose up -d --no-build
+```
+
+Bash equivalents use `bash scripts/generate-content.sh` with the same arguments. On the native cloud setup:
+
+```bash
+source scripts/local-db.sh
+.venv/bin/python backend/manage.py generate_content missions --count 5 --rank 0
+.venv/bin/python backend/manage.py generate_content servers --count 4 --rank 0 --exploitable
+```
+
+Ranks are 0 Ghost through 4 Architect. Each call creates unique server addresses and mission identities. Missions receive unused numbers from the existing 0–255 pool; a request exceeding remaining capacity fails without creating partial content. Use `--objective retrieve` or `--objective delete` for a specific mission type; `--encrypted` creates encrypted retrieval jobs. Omitting both chooses randomly. Generated proxy servers appear in Atlas's directory on the next refresh and can be bookmarked and routed through. `--exploitable` gives a server an amber opportunity marker and ransomware eligibility.
+
+Generated content lives in PostgreSQL and is included in normal `pg_dump` archives. Development database resets erase it along with accounts; back it up before another fresh build. These commands generate new content without changing or deleting existing content.
+
+### Null Exchange and epic software
+
+The hidden server is absent from a new runner's public directory. Enter `rumors` in the local terminal for an invitation, then `connect null-exchange.internal` while disconnected and without a reserved contract. This unlocks **Null Exchange** in that save's sidebar. It sells two perpetual epic licenses:
+
+| Software | Price | RAM | Commands |
+| --- | ---: | ---: | --- |
+| Wraith Rootkit | 2,400 CPH | 3 GB | `install` in Wraith's console; later `jump <host>` in the local terminal |
+| Eclipse Ransomware | 1,800 CPH | 3 GB | `deploy <host>` in Eclipse's console |
+
+Purchase licenses at Null Exchange and launch them through Applications. Upgrade memory or close other tools if you exceed your RAM capacity. Each save has its own discovery state, licenses, backdoors, and operations.
+
+**Backdoors:** scan a contract target or directory server with Cartograph, connect from the local terminal, crack its discovered port with Lockpick, then run `install` in Wraith's console. Installation requires mounted filesystem access. Clean the initial intrusion logs with Ashfall before disconnecting. Backdoors persist after contract completion and sign-out.
+
+**Backdoored Servers** appears only while the Wraith license is owned. Its Connect buttons launch/open your terminal and connect directly to the selected server. You can also use `jump <host>`. These later connections bypass the saved proxy chain and its lease, grant filesystem access, suppress remote access logs, and have no trace countdown. Your saved proxy route remains available for ordinary connections. A reserved contract still must match the server you visit, and objective evidence plus a clean disconnect and `submit` are still required for payment.
+
+**Ransomware:** four starter opportunity servers appear in amber in Atlas's directory. Add them to your map if desired. Scan, connect, and crack one, then run `deploy <host>` in Eclipse. Contract targets and ordinary proxy-only servers refuse deployment. At most **three instances** may be active per save, with one per server. Each completes after **120 seconds**, pays **800 CPH** on a starter server, and removes itself. Higher-rank generated opportunities pay `800 + 200 × rank` CPH. You may deploy again after completion; the perpetual license remains owned. Clean your access logs and disconnect while operations run, or use an existing Wraith backdoor.
+
+Pending operations continue by server time while you are away. Payments settle on the next game request; the open app polls while instances are pending. Eclipse logs the completion message, the bank records the payment, and the active-instance panel frees the slot. Row locks prevent duplicate payments from simultaneous requests. Restarting a save clears its hidden-market progress and pending operations; other saves are preserved.
+
+All tools operate on fictional game records. No payloads are generated, no host commands are run, and no external servers are contacted.
+
 ## v0.5 — broker controls, numeric IDs, and PostgreSQL lifecycle
 
 The broker now has **Accept** and **Abort** buttons. The terminal still accepts `accept <id>` and `abort`; all scanning, routing, remote work, cleanup, and delivery remain manual. Aborting applies the displayed liability, up to 60 reputation loss, and a ten-minute replacement cooldown. You can reserve one assignment per save.
@@ -77,7 +127,7 @@ Cipher bank, the contract broker, and Atlas are available directly from the left
 
 Atlas routes chain **individual named servers**, such as `Intel Corp: Public Access → MilTech Research Center → NY Public Library Terminal`. Each server has its own fictional address, organization, category, clearance, fee, and trace delay; geography remains a secondary map coordinate.
 
-Use **Atlas → Network directory** to search the 12 listed servers and filter by server type or saved entries. **Add to Atlas** saves a server in the current runner's personal directory and makes it visible on their routing map. **Remove from Atlas** removes that bookmark and prunes the server from their committed proxy chain while preserving the remaining hop order. Directory changes save immediately; routing changes still use **Commit route**. Live remote connections lock directory and route edits. Bookmarking a restricted server does not bypass its proxy clearance.
+Use **Atlas → Network directory** to search the built-in and generated servers and filter by server type or saved entries. **Add to Atlas** saves a server in the current runner's personal directory and makes it visible on their routing map. **Remove from Atlas** removes that bookmark and prunes the server from their committed proxy chain while preserving the remaining hop order. Directory changes save immediately; routing changes still use **Commit route**. Live remote connections lock directory and route edits. Bookmarking a restricted server does not bypass its proxy clearance.
 
 New runners start with Intel, MilTech, NY Library, and Northstar University in Atlas. Migration `0003_atlas_server_directory` preserves all 12 previously visible nodes for existing saves, along with committed routes, route costs, balances, and live sessions. Restarting a slot restores the new four-server starter directory.
 
@@ -172,7 +222,7 @@ With `scripts/dev.sh` running:
 bash scripts/test.sh
 ```
 
-This runs the Django suite against a separate PostgreSQL test database, builds Vue, and runs Chromium browser tests. The database role needs permission to create the test database and a disposable lifecycle database. The lifecycle check uses `pg_dump` and `pg_restore` from PATH or `NETRUNNER_PG_BIN`, and verifies actual drop/recreation, restart persistence, and an archive round trip. It is skipped if those client tools are unavailable. Browser tests create accounts prefixed `e2e_` in the development database. They verify the manual tools-and-proxy contract loop, persistent cursor focus (including failed requests), bank charges, purchases/fitting/resale, three saves, sign-in persistence, confirmed bankruptcy recovery, and mobile layouts. Set `CHROMIUM_PATH` if Chromium is not at `/usr/bin/chromium`.
+This runs the Django suite against a separate PostgreSQL test database, builds Vue, and runs Chromium browser tests. The database role needs permission to create the test database and a disposable lifecycle database. The lifecycle check uses `pg_dump` and `pg_restore` from PATH or `NETRUNNER_PG_BIN`, and verifies actual drop/recreation, restart persistence, and an archive round trip including generated content, backdoors, and pending operations. It is skipped if those client tools are unavailable. Browser tests create accounts prefixed `e2e_` in the development database. They verify hidden-market purchases, persistent direct backdoors, ransomware deployment, the manual tools-and-proxy contract loop, persistent cursor focus (including failed requests), bank charges, purchases/fitting/resale, three saves, sign-in persistence, confirmed bankruptcy recovery, and mobile layouts. The epic-market browser scenario uses the native Django environment to seed an offline test account with funds and memory; no public cheat API is provided. Set `CHROMIUM_PATH` if Chromium is not at `/usr/bin/chromium`.
 
 Backend-only checks:
 

@@ -14,6 +14,7 @@ urlpatterns = [
     path('api/slots/<int:slot_id>/route/', views.route),
     path('api/slots/<int:slot_id>/directory/', views.directory),
     path('api/slots/<int:slot_id>/restart/', views.restart),
+    path('api/slots/<int:slot_id>/backdoors/', views.backdoor_connect),
     path('api/slots/<int:slot_id>/contracts/', views.contract_action),
     path('api/slots/<int:slot_id>/accept/', views.legacy_action),
     path('api/slots/<int:slot_id>/upgrade/', views.legacy_action),

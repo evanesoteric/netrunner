@@ -5,11 +5,12 @@ from datetime import timedelta
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from .catalog import (
-    BUILTIN_APPS, CONTRACTS, CONTRACT_BY_ID, FAILURE_COOLDOWN, HARDWARE,
-    PRODUCTS, RELAY_BY_ID, SOFTWARE, SUCCESS_COOLDOWN, HOME_NODE, RANKS,
+    BUILTIN_APPS, FAILURE_COOLDOWN, HARDWARE,
+    PRODUCTS, SOFTWARE, SUCCESS_COOLDOWN, HOME_NODE, RANKS,
 )
 from .models import LedgerEntry
 from .contracts import codes, public_code
+from .world import all_contracts, get_contract, get_server, session_target
 
 
 class GameError(Exception):
@@ -24,9 +25,9 @@ def ram_used(slot):
     return sum(BUILTIN_APPS[key]['ram'] if key in BUILTIN_APPS else SOFTWARE[value]['ram'] for key, value in slot.running_apps.items())
 
 
-def route_stats(slot, route=None):
-    nodes = [RELAY_BY_ID[key] for key in (slot.proxy_route if route is None else route)]
-    destination = CONTRACT_BY_ID.get(slot.active_contract)
+def route_stats(slot, route=None, target=None):
+    nodes = [get_server(key) for key in (slot.proxy_route if route is None else route)]
+    destination = target or session_target(slot)
     points = [HOME_NODE] + nodes + ([destination] if destination else [])
     transit = sum(math.hypot(a['x'] - b['x'], a['y'] - b['y']) for a, b in zip(points, points[1:]))
     return {'hops': len(nodes), 'fee': 8 + sum(n['fee'] for n in nodes), 'delay': sum(n['delay'] for n in nodes), 'latency': sum(n['latency'] for n in nodes) + math.ceil(transit / 30)}
@@ -38,7 +39,7 @@ def available_at(slot, contract_id):
 
 
 def trace_remaining(slot):
-    if not slot.mission_started:
+    if not slot.mission_started or slot.remote_host.get('_backdoor'):
         return None
     elapsed = (timezone.now() - slot.mission_started).total_seconds()
     return max(0, math.ceil(slot.mission_state.get('trace_budget', 0) - slot.mission_state.get('work', 0) - elapsed))
@@ -56,21 +57,28 @@ def transact(slot, amount, description):
 
 
 def fail(slot, reason):
-    job = CONTRACT_BY_ID.get(slot.active_contract)
+    job = session_target(slot)
     if not job:
         return
+    contract_failure = bool(slot.active_contract)
     fine = min(slot.balance, 90 + job['rank'] * 80)
     if fine:
-        transact(slot, -fine, f'Contract failure // {public_code(job["id"])}')
+        transact(slot, -fine, f'Contract failure // {public_code(slot.active_contract)}' if slot.active_contract else f'Intrusion failure // {job["target"]}')
     slot.reputation = max(0, slot.reputation - 60)
-    slot.contract_cooldowns = {**slot.contract_cooldowns, job['id']: (timezone.now() + timedelta(seconds=FAILURE_COOLDOWN)).isoformat()}
+    if slot.active_contract:
+        slot.contract_cooldowns = {**slot.contract_cooldowns, slot.active_contract: (timezone.now() + timedelta(seconds=FAILURE_COOLDOWN)).isoformat()}
     slot.active_contract = ''
+    slot.remote_host = {}
     slot.mission_started = None
     slot.mission_state = {}
-    log(slot, 'terminal', f'{reason}\nContract lost. Fine {fine} CPH. Reputation −60 (floor 0). Broker refresh: 10 minutes.')
+    outcome = 'Contract lost.' if contract_failure else 'Remote link lost.'
+    refresh = ' Broker refresh: 10 minutes.' if contract_failure else ''
+    log(slot, 'terminal', f'{reason}\n{outcome} Fine {fine} CPH. Reputation −60 (floor 0).{refresh}')
 
 
 def settle(slot):
+    from .operations import settle_ransomware
+    settle_ransomware(slot)
     if slot.mission_started and trace_remaining(slot) == 0:
         fail(slot, 'TRACE COMPLETE. Your gateway was identified.')
         slot.save()
@@ -81,20 +89,20 @@ def validate_route(slot, route):
         raise GameError('Disconnect before changing your route.')
     if not isinstance(route, list) or any(not isinstance(key, str) for key in route):
         raise GameError('Route must be a list of relay IDs.')
-    if len(route) != len(set(route)) or any(key not in RELAY_BY_ID for key in route):
+    if len(route) != len(set(route)) or any(not get_server(key) for key in route):
         raise GameError('Use distinct servers from Atlas.')
     if any(key not in slot.atlas_nodes for key in route):
         raise GameError('Add each server to your Atlas directory before routing through it.')
     if len(route) > hardware(slot)['gateway']['hops']:
         raise GameError('This gateway cannot support that many proxy hops.')
-    if any(RELAY_BY_ID[key]['rank'] > slot.rank for key in route):
+    if any(get_server(key)['rank'] > slot.rank for key in route):
         raise GameError('A server on this route exceeds your clearance.')
 
 
 def edit_directory(slot, action, server_id):
     if slot.mission_started:
         raise GameError('Disconnect before editing your Atlas directory.')
-    if not isinstance(server_id, str) or server_id not in RELAY_BY_ID:
+    if not isinstance(server_id, str) or not get_server(server_id) or (get_server(server_id).get('hidden') and not slot.market_unlocked):
         raise GameError('Select a server from the network directory.')
     if action == 'add':
         if server_id not in slot.atlas_nodes:
@@ -129,6 +137,8 @@ def trade(slot, action, product_id):
     if not isinstance(product_id, str) or product_id not in PRODUCTS:
         raise GameError('Unknown product.')
     item = PRODUCTS[product_id]
+    if item.get('black_market') and not slot.market_unlocked:
+        raise GameError('Discover the hidden market before trading epic licenses.')
     owned = slot.installed_software if product_id in SOFTWARE else slot.owned_hardware
     if action == 'buy':
         if product_id in owned:
@@ -160,22 +170,24 @@ def trade(slot, action, product_id):
 
 
 MANUALS = {
-    'terminal': 'LOCAL SHELL\nhelp — application manual\napps — running processes and RAM\ncontracts — broker listings\naccept <contract-id> — reserve by the numeric ID in contracts (0–255)\nbrief — read the accepted brief\nroute — inspect the committed proxy chain\nconnect <host> — dial a fictional target\nstatus — gateway status\nls — remote file listing\nget <file> — copy a readable file to local storage\nrm <file> — remove a remote file\ndisconnect — end the remote session\nsubmit — deliver evidence to the broker\nabort — abandon the contract (fine and reputation loss)\nclear — clear local console output',
+    'terminal': 'LOCAL SHELL\nhelp — application manual\nrumors — intercepted hidden-service invitation\njump <host> — use an installed Wraith backdoor\napps — running processes and RAM\ncontracts — broker listings\naccept <contract-id> — reserve by the numeric ID in contracts (0–255)\nbrief — read the accepted brief\nroute — inspect the committed proxy chain\nconnect <host> — dial a fictional target\nstatus — gateway status\nls — remote file listing\nget <file> — copy a readable file to local storage\nrm <file> — remove a remote file\ndisconnect — end the remote session\nsubmit — deliver evidence to the broker\nabort — abandon the contract (fine and reputation loss)\nclear — clear local console output',
     'mapper': 'CARTOGRAPH\nscan <host> — inspect a fictional host and its services\nCosts 1 + tool tier CPH. Scan quality depends on tool capability.',
     'cracker': 'LOCKPICK\ncrack <port> — attack a discovered authentication service\nRequires an active remote connection. Underpowered tools can fail.',
     'decryptor': 'ROSETTA\ndecrypt <file> — decode an encrypted remote archive\nRequires file access and a sufficient decryption engine.',
     'cleaner': 'ASHFALL\nerase — remove remote access logs\nLater remote operations can leave new log entries.',
     'monitor': 'TRIPWIRE\ntrace — inspect the active trace\nThe monitor must remain running to show a live countdown.',
+    'rootkit': 'WRAITH // EPIC\ninstall — persist a backdoor on the currently mounted server. Clean initial logs before leaving.\nFuture jump <host> connections bypass proxies and logs.',
+    'ransomware': 'ECLIPSE // EPIC\ndeploy <host> — install on the currently mounted amber non-contract server. Maximum 3 instances; payout after 120 seconds; each instance then removes itself.',
     'bank': 'CIPHER BANK\nbalance — account balance\nhistory — latest 15 ledger entries',
 }
 
 
 def reserve(slot, contract_id):
-    if slot.active_contract:
-        raise GameError('An assignment is already reserved.')
+    if slot.active_contract or slot.mission_started:
+        raise GameError('An assignment or remote session is already open.')
     mapping = codes()
     key = next((key for key, code in mapping.items() if str(code) == contract_id), None)
-    job = CONTRACT_BY_ID.get(key)
+    job = get_contract(key)
     if not job:
         raise GameError(f'Unknown contract ID {contract_id!r}. Run contracts and use its numeric ID (0–255).')
     if abs(job['rank'] - slot.rank) > 1:
@@ -185,6 +197,7 @@ def reserve(slot, contract_id):
     if ready and ready > timezone.now():
         raise GameError('The broker is still sourcing a replacement assignment. Check its availability time.')
     slot.active_contract = key
+    slot.remote_host = {}
     slot.mission_state = {}
     slot.mission_started = None
     return f'Reservation confirmed: {public_code(job["id"])}.\n{job["description"]}\nTarget: {job["target"]}. Payment: {job["reward"]} CPH.'
@@ -219,7 +232,7 @@ def execute(slot, app, raw):
     if verb == 'help' and not args:
         log(slot, app, MANUALS[app])
         return
-    job = CONTRACT_BY_ID.get(slot.active_contract)
+    job = session_target(slot)
     state = slot.mission_state
     result = ''
     try:
@@ -232,6 +245,16 @@ def execute(slot, app, raw):
                 result = 'Unknown bank command. Read help for the bank manual.'
         elif app == 'terminal':
             result = _shell(slot, verb, args, job)
+        elif app == 'rootkit':
+            from .operations import install_rootkit
+            if verb != 'install' or args:
+                raise GameError('Use install while connected to a mounted server.')
+            result = install_rootkit(slot)
+        elif app == 'ransomware':
+            from .operations import deploy_ransomware
+            if verb != 'deploy' or len(args) != 1:
+                raise GameError('Use deploy <host> on an amber opportunity server.')
+            result = deploy_ransomware(slot, args[0])
         else:
             usages = {'mapper': ('scan', 1), 'cracker': ('crack', 1), 'decryptor': ('decrypt', 1), 'cleaner': ('erase', 0), 'monitor': ('trace', 0)}
             expected, count = usages[app]
@@ -240,11 +263,16 @@ def execute(slot, app, raw):
             if app == 'monitor':
                 if slot.mission_started and SOFTWARE[slot.running_apps[app]]['power'] < job['security']:
                     result = 'Trace encrypted: this monitor cannot decode the target security class.'
+                elif slot.remote_host.get('_backdoor'):
+                    result = 'Wraith link: remote logging suppressed. No active trace.'
                 else:
                     result = f'Trace remaining: {trace_remaining(slot)} seconds.' if slot.mission_started else 'No active remote trace.'
             else:
+                if app == 'mapper' and not slot.mission_started:
+                    from .operations import find_target
+                    job = find_target(slot, args[0])
                 if not job:
-                    raise GameError('No reserved target.')
+                    raise GameError('No target. Scan a directory server or reserve an assignment.')
                 if app != 'mapper' and not slot.mission_started:
                     raise GameError('No remote session.')
                 if app == 'mapper' and args[0] != job['target']:
@@ -258,6 +286,7 @@ def execute(slot, app, raw):
                     raise GameError(f'Tool capability {tool["power"]} is insufficient for security class {job["security"]}. Operation failed.')
                 if app == 'mapper':
                     state['scanned'] = True
+                    state['scanned_host'] = job['target']
                     if slot.mission_started:
                         state['dirty'] = True
                     result = f'Host: {job["target"]}\n{job["port"]}/tcp  OPEN  auth-v{job["security"]}\nArchive: {job["file"]} / {job["size"]} MB / {"encrypted" if job["encrypted"] else "plaintext"}\nOther ports: filtered. Scan complete.'
@@ -284,46 +313,47 @@ def execute(slot, app, raw):
         result = str(exc)
         if slot.mission_started:
             slot.mission_state['work'] = slot.mission_state.get('work', 0) + 6
+    if slot.remote_host.get('_backdoor'):
+        slot.mission_state['dirty'] = False
     log(slot, app, result)
     settle(slot)
 
 
 def _shell(slot, verb, args, job):
-    arity = {'apps': 0, 'contracts': 0, 'accept': 1, 'route': 0, 'status': 0, 'brief': 0, 'abort': 0, 'connect': 1, 'submit': 0, 'disconnect': 0, 'ls': 0, 'get': 1, 'rm': 1}
+    arity = {'jump': 1, 'rumors': 0, 'apps': 0, 'contracts': 0, 'accept': 1, 'route': 0, 'status': 0, 'brief': 0, 'abort': 0, 'connect': 1, 'submit': 0, 'disconnect': 0, 'ls': 0, 'get': 1, 'rm': 1}
     if verb not in arity or len(args) != arity[verb]:
         raise GameError('Unknown shell command or arguments. Read help for the shell manual.')
     state = slot.mission_state
+    if verb == 'rumors':
+        return 'Intercepted invitation: null-exchange.internal. Dial it from a local terminal; the public directory has no listing.'
+    if verb in ('connect', 'jump'):
+        from .operations import connect_target
+        return connect_target(slot, args[0], backdoor=verb == 'jump')
     if verb == 'apps' and not args:
         return '\n'.join(f'{key}: {BUILTIN_APPS[value]["name"] if value in BUILTIN_APPS else SOFTWARE[value]["name"]}' for key, value in slot.running_apps.items()) + f'\nRAM: {ram_used(slot)} / {hardware(slot)["memory"]["ram"]} GB'
     if verb == 'contracts' and not args:
         mapping = codes()
-        return '\n'.join(f'ID {mapping[c["id"]]}  [{RANKS[c["rank"]]}]  {c["title"]}  {c["reward"]} CPH  {"cooling down" if available_at(slot, c["id"]) and available_at(slot, c["id"]) > timezone.now() else "available"}' for c in CONTRACTS if abs(c['rank'] - slot.rank) <= 1)
+        return '\n'.join(f'ID {mapping[c["id"]]}  [{RANKS[c["rank"]]}]  {c["title"]}  {c["reward"]} CPH  {"cooling down" if available_at(slot, c["id"]) and available_at(slot, c["id"]) > timezone.now() else "available"}' for c in all_contracts() if abs(c['rank'] - slot.rank) <= 1)
     if verb == 'accept' and len(args) == 1:
         return reserve(slot, args[0])
     if verb == 'route' and not args:
-        return 'GATEWAY → ' + ' → '.join([RELAY_BY_ID[key]['name'] + ' [' + RELAY_BY_ID[key]['address'] + ']' for key in slot.proxy_route] + ['TARGET']) + f'\nConnection lease: {route_stats(slot)["fee"]} CPH'
+        return 'GATEWAY → ' + ' → '.join([get_server(key)['name'] + ' [' + get_server(key)['address'] + ']' for key in slot.proxy_route] + ['TARGET']) + f'\nConnection lease: {route_stats(slot)["fee"]} CPH'
     if verb == 'status' and not args:
         return f'Balance: {slot.balance} CPH\nRAM: {ram_used(slot)}/{hardware(slot)["memory"]["ram"]} GB\nRemote: {job["target"] if job and slot.mission_started else "disconnected"}\nLocal archive: {job["file"] if job and state.get("recovered") else "empty"}'
     if not job:
         raise GameError('No reserved contract.')
     if verb == 'brief' and not args:
+        if not slot.active_contract:
+            raise GameError('No reserved contract.')
         return f'{public_code(job["id"])} // {job["description"]}\nTarget: {job["target"]}. Reward: {job["reward"]} CPH.'
     if verb == 'abort' and not args:
+        if not slot.active_contract:
+            raise GameError('No reserved contract. Use disconnect to leave this server.')
         fail(slot, 'Assignment abandoned.')
         return 'Broker notified.'
-    if verb == 'connect' and len(args) == 1:
-        if slot.mission_started:
-            raise GameError('A remote session is already open.')
-        if args[0] != job['target']:
-            raise GameError('Host not present in your reserved network directory.')
-        # A rank loss can invalidate previously accessible relays.
-        validate_route(slot, slot.proxy_route)
-        stats = route_stats(slot)
-        transact(slot, -stats['fee'], f'Route lease // {job["target"]}')
-        slot.mission_started = timezone.now()
-        state.update(trace_budget=100 - job['security'] * 10 + stats['delay'] + hardware(slot)['gateway']['stealth'] * 8, work=0, latency=stats['latency'], access=False, dirty=False, clean_exit=False)
-        return f'Dialing {job["target"]} via {stats["hops"]} proxies.\nLease paid: {stats["fee"]} CPH. Remote session established.'
     if verb == 'submit' and not args:
+        if not slot.active_contract:
+            raise GameError('No reserved contract to submit.')
         if slot.mission_started:
             raise GameError('Cannot deliver evidence while connected to the target.')
         fulfilled = state.get('recovered') if job['objective'] == 'retrieve' else state.get('deleted')
@@ -344,6 +374,7 @@ def _shell(slot, verb, args, job):
             return 'Remote link closed.'
         slot.mission_started = None
         state.update(clean_exit=True, access=False)
+        slot.remote_host = {}
         return 'Remote link closed. No access signature found.'
     if verb in ('ls', 'get', 'rm'):
         if not state.get('access'):

@@ -213,7 +213,7 @@ class SimulationTests(APIHelpers, TestCase):
         self.assertLessEqual(response['ram_used'], response['equipment']['memory']['ram'])
 
     def test_multiple_named_products_per_category_and_tier(self):
-        self.assertEqual(len(PRODUCTS), 90)
+        self.assertEqual(len(PRODUCTS), 92)
         for category in ['cpu', 'gateway', 'memory', 'storage']:
             for tier in range(1, 6):
                 self.assertEqual(len([p for p in PRODUCTS.values() if p['category'] == category and p['tier'] == tier]), 2)
@@ -431,7 +431,7 @@ class SimulationTests(APIHelpers, TestCase):
     def test_atlas_has_named_saved_servers_and_full_network_directory(self):
         result = self.refresh()
         self.assertEqual(len(result['relays']), 4)
-        self.assertEqual(len(result['network_directory']), 12)
+        self.assertEqual(len(result['network_directory']), 16)
         names = {server['name'] for server in result['relays']}
         self.assertIn('Intel Corp: Public Access', names)
         self.assertIn('MilTech Research Center', names)
@@ -535,6 +535,15 @@ class ConcurrentEconomyTests(APIHelpers, TransactionTestCase):
         self.slot.refresh_from_db()
         self.assertEqual(self.slot.balance, 300 - PRODUCTS['cpu-1-specialist']['price'])
         self.assertEqual(self.slot.owned_hardware.count('cpu-1-specialist'), 1)
+
+    def test_concurrent_requests_settle_ransomware_only_once(self):
+        self.slot.ransomware_ops = [{'target': 'vesper-dispatch.internal', 'due_at': (timezone.now() - timedelta(seconds=1)).isoformat(), 'reward': 800}]
+        self.slot.save()
+        self.assertEqual(self.parallel_post('command', {'application': 'terminal', 'command': 'status'}), [200, 200])
+        self.slot.refresh_from_db()
+        self.assertEqual(self.slot.balance, 2000)
+        self.assertEqual(self.slot.ransomware_ops, [])
+        self.assertEqual(self.slot.ledger.filter(description__startswith='Ransomware payout').count(), 1)
 
 
 class LegacySaveMigrationTests(TransactionTestCase):
@@ -665,6 +674,13 @@ class DevelopmentDatabaseLifecycleTests(TestCase):
                     "user = get_user_model().objects.create_user('lifecycle-runner'); "
                     "slot = SaveSlot.objects.create(user=user, position=1, alias='Archive', balance=842, reputation=130, active_contract='0-1'); "
                     "slot.ledger.create(amount=-90, description='Archive test receipt')")
+                run(sys.executable, str(manage), 'generate_content', 'missions', '--count', '1')
+                run(sys.executable, str(manage), 'generate_content', 'servers', '--count', '1', '--exploitable')
+                run(sys.executable, str(manage), 'shell', '-c',
+                    "from game.models import SaveSlot; from game.world import get_server, target_for_server; from django.utils import timezone; from datetime import timedelta; "
+                    "slot = SaveSlot.objects.get(alias='Archive'); slot.backdoors = [target_for_server(get_server('world-0'))]; "
+                    "slot.ransomware_ops = [dict(target='vesper-dispatch.internal', due_at=(timezone.now()+timedelta(seconds=120)).isoformat(), reward=800)]; "
+                    "slot.market_unlocked=True; slot.installed_software += ['rootkit-epic', 'ransomware-epic']; slot.save()")
                 identities = query('SELECT template_key, code FROM game_contractidentity ORDER BY template_key')
                 query('CREATE TABLE lifecycle_probe (value text)')
                 query("INSERT INTO lifecycle_probe VALUES ('backup survives')")
@@ -685,6 +701,206 @@ class DevelopmentDatabaseLifecycleTests(TestCase):
                 self.assertEqual(query('SELECT template_key, code FROM game_contractidentity ORDER BY template_key'), identities)
                 self.assertEqual(query('SELECT alias, balance, reputation, active_contract FROM game_saveslot'), [('Archive', 842, 130, '0-1')])
                 self.assertEqual(query('SELECT amount, description FROM game_ledgerentry'), [(-90, 'Archive test receipt')])
+                self.assertEqual(query('SELECT count(*) FROM game_generatedmission'), [(1,)])
+                self.assertEqual(query('SELECT count(*) FROM game_directoryserver'), [(6,)])
+                self.assertEqual(query("SELECT backdoors->0->>'target', ransomware_ops->0->>'reward', market_unlocked FROM game_saveslot"), [('vesper-dispatch.internal', '800', True)])
         finally:
             with psycopg.connect(dbname='postgres', autocommit=True, **params) as maintenance:
                 maintenance.execute(sql.SQL('DROP DATABASE IF EXISTS {} WITH (FORCE)').format(sql.Identifier(name)))
+
+
+class GeneratedWorldTests(APIHelpers, TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user('world-author')
+        self.client.force_login(self.user)
+        self.slot = SaveSlot.objects.create(user=self.user, position=1, alias='Author')
+
+    @override_settings(DEBUG=True)
+    def test_generated_mission_is_unique_rank_filtered_and_playable(self):
+        from .models import GeneratedMission
+        call_command('generate_content', 'missions', count=3, rank=0, objective='delete', stdout=StringIO())
+        jobs = [row.data for row in GeneratedMission.objects.all()]
+        self.assertEqual(len(set(job['target'] for job in jobs)), 3)
+        self.assertEqual(len(set(public_code(job['id']) for job in jobs)), 3)
+        listed = self.refresh()['contracts']
+        self.assertEqual(len(listed), 9)
+        for job in jobs:
+            response = self.reserve(public_code(job['id']))
+            self.assertEqual(response['active_contract']['target'], job['target'])
+            self.launch('mapper-1-standard')
+            self.cmd(f'scan {job["target"]}', 'mapper')
+            self.cmd(f'connect {job["target"]}')
+            self.launch('cracker-1-standard')
+            self.cmd(f'crack {job["port"]}', 'cracker')
+            if job['encrypted']:
+                self.cmd('abort')
+            else:
+                self.cmd(f'{"get" if job["objective"] == "retrieve" else "rm"} {job["file"]}')
+                self.clean_exit()
+                result = self.cmd('submit')
+                self.assertIn('Delivery verified', self.log_text(result))
+        call_command('generate_content', 'missions', count=1, rank=4, stdout=StringIO())
+        result = self.refresh()
+        self.assertTrue(all(abs(job['rank'] - result['rank']) <= 1 for job in result['contracts']))
+
+    @override_settings(DEBUG=True)
+    def test_generated_servers_can_be_bookmarked_and_used_as_proxies(self):
+        from .models import DirectoryServer
+        call_command('generate_content', 'servers', count=2, rank=0, exploitable=True, stdout=StringIO())
+        servers = list(DirectoryServer.objects.filter(key__startswith='srv-'))
+        self.assertEqual(len({server.address for server in servers}), 2)
+        ids = [server.key for server in servers]
+        for key in ids:
+            self.post(self.endpoint('directory'), {'action': 'add', 'server_id': key})
+        result = self.post(self.endpoint('route'), {'nodes': ids})
+        self.assertEqual(result['proxy_route'], ids)
+        self.assertTrue(all(server.data['exploitable'] for server in servers))
+
+    @override_settings(DEBUG=False)
+    def test_generation_is_development_only(self):
+        with self.assertRaises(CommandError):
+            call_command('generate_content', 'missions', count=1, rank=0, stdout=StringIO())
+
+    @override_settings(DEBUG=True)
+    def test_generator_capacity_failure_is_atomic(self):
+        from .models import GeneratedMission
+        used = set(ContractIdentity.objects.values_list('code', flat=True))
+        ContractIdentity.objects.bulk_create([ContractIdentity(template_key=f'fill{code}', code=code) for code in range(256) if code not in used])
+        with self.assertRaises(CommandError):
+            call_command('generate_content', 'missions', count=1, rank=0, stdout=StringIO())
+        self.assertEqual(GeneratedMission.objects.count(), 0)
+        with self.assertRaises(CommandError):
+            call_command('generate_content', 'servers', count=0, rank=0, stdout=StringIO())
+
+
+class HiddenOperationsTests(APIHelpers, TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user('hidden-runner')
+        self.client.force_login(self.user)
+        self.slot = SaveSlot.objects.create(user=self.user, position=1, alias='Hidden', balance=10000)
+        self.slot.equipment['memory'] = 'memory-1-specialist'
+        self.slot.owned_hardware.append('memory-1-specialist')
+        self.slot.save()
+
+    def purchase(self, product):
+        self.launch('terminal')
+        self.cmd('connect null-exchange.internal')
+        return self.post(self.endpoint('loadout'), {'action': 'buy', 'product_id': product})
+
+    def mount(self, address):
+        self.launch('terminal')
+        self.launch('mapper-1-standard')
+        self.cmd(f'scan {address}', 'mapper')
+        response = self.cmd(f'connect {address}')
+        self.assertTrue(response['connected'], self.log_text(response))
+        self.launch('cracker-1-standard')
+        self.cmd('crack 22', 'cracker')
+
+    def test_market_is_hidden_until_discovery_and_prices_are_enforced(self):
+        before = self.refresh()
+        self.assertFalse(before['market_unlocked'])
+        self.assertEqual(before['black_market_catalog'], [])
+        self.assertFalse(any(server.get('hidden') for server in before['network_directory']))
+        self.post(self.endpoint('directory'), {'action': 'add', 'server_id': 'world-4'}, 400)
+        self.post(self.endpoint('loadout'), {'action': 'buy', 'product_id': 'rootkit-epic'}, 400)
+        after = self.purchase('rootkit-epic')
+        self.assertTrue(after['market_unlocked'])
+        self.assertEqual(after['balance'], 7600)
+        self.assertIn('rootkit-epic', after['installed_software'])
+        self.post(self.endpoint('loadout'), {'action': 'buy', 'product_id': 'rootkit-epic'}, 400)
+        self.assertEqual(len(after['black_market_catalog']), 2)
+
+    def test_rootkit_requires_access_and_persists_direct_log_free_connections(self):
+        self.purchase('rootkit-epic')
+        self.launch('rootkit-epic')
+        rejected = self.cmd('install', 'rootkit')
+        self.assertIn('Mount the current server', self.log_text(rejected))
+        self.gain_access()
+        installed = self.cmd('install', 'rootkit')
+        self.assertEqual(installed['backdoors'][0]['target'], 'helix-0.internal')
+        self.cmd('get research.dat')
+        self.clean_exit()
+        self.cmd('submit')
+        self.slot.refresh_from_db()
+        before = self.slot.balance
+        # A saved route is retained, but bypassed even when current clearance disallows it.
+        self.slot.proxy_route = ['tokyo']
+        self.slot.save()
+        connected = self.post(self.endpoint('backdoors'), {'target': 'helix-0.internal'})
+        self.assertTrue(connected['stealth_session'])
+        self.assertEqual(connected['balance'], before)
+        self.assertEqual(connected['proxy_route'], ['tokyo'])
+        self.cmd('ls')
+        self.slot.refresh_from_db()
+        self.assertFalse(self.slot.mission_state['dirty'])
+        from unittest.mock import patch
+        with patch('django.utils.timezone.now', return_value=timezone.now() + timedelta(hours=1)):
+            self.assertTrue(self.refresh()['connected'])
+        result = self.cmd('disconnect')
+        self.assertEqual(result['balance'], before)
+        self.assertEqual(len(result['backdoors']), 1)
+        self.assertIn('No access signature', self.log_text(result))
+        SaveSlot.objects.filter(pk=self.slot.pk).update(contract_cooldowns={})
+        self.reserve()
+        self.post(self.endpoint('backdoors'), {'target': 'helix-0.internal'})
+        self.cmd('get research.dat')
+        self.cmd('disconnect')
+        result = self.cmd('submit')
+        self.assertIn('Delivery verified', self.log_text(result))
+        self.assertEqual(result['balance'], before + 220)
+
+    def test_backdoor_requests_require_ownership_known_target_and_slot_ownership(self):
+        self.post(self.endpoint('backdoors'), {'target': 'helix-0.internal'}, 400)
+        self.purchase('rootkit-epic')
+        self.post(self.endpoint('backdoors'), {'target': 'nonexistent.internal'}, 400)
+        other = get_user_model().objects.create_user('other-hidden')
+        other_slot = SaveSlot.objects.create(user=other, position=1, alias='Other')
+        self.post(f'slots/{other_slot.pk}/backdoors', {'target': 'helix-0.internal'}, 404)
+
+    def test_ransomware_three_instance_limit_once_only_payout_and_redeployment(self):
+        self.purchase('ransomware-epic')
+        self.launch('ransomware-epic')
+        addresses = ['vesper-dispatch.internal', 'cobalt-render.internal', 'nimbus-inventory.internal', 'aster-backup.internal']
+        for index, address in enumerate(addresses):
+            self.mount(address)
+            result = self.cmd(f'deploy {address}', 'ransomware')
+            if index < 3:
+                self.assertEqual(len(result['ransomware_ops']), index + 1)
+                repeated = self.cmd(f'deploy {address}', 'ransomware')
+                self.assertEqual(len(repeated['ransomware_ops']), index + 1)
+            else:
+                self.assertIn('Three ransomware instances', self.log_text(result))
+                self.assertEqual(len(result['ransomware_ops']), 3)
+            self.clean_exit()
+        before = self.refresh()['balance']
+        from unittest.mock import patch
+        with patch('django.utils.timezone.now', return_value=timezone.now() + timedelta(seconds=121)):
+            result = self.refresh()
+            self.assertEqual(result['balance'], before + 2400)
+            self.assertEqual(result['ransomware_ops'], [])
+            self.assertEqual(self.refresh()['balance'], before + 2400)
+        self.assertEqual(self.slot.ledger.filter(description__startswith='Ransomware payout').count(), 3)
+        self.mount(addresses[0])
+        self.assertEqual(len(self.cmd(f'deploy {addresses[0]}', 'ransomware')['ransomware_ops']), 1)
+
+    def test_ransomware_refuses_contract_and_proxy_only_servers(self):
+        self.purchase('ransomware-epic')
+        self.launch('ransomware-epic')
+        self.gain_access()
+        result = self.cmd('deploy helix-0.internal', 'ransomware')
+        self.assertEqual(result['ransomware_ops'], [])
+        self.assertIn('non-contract opportunity', self.log_text(result))
+        self.cmd('abort')
+        self.mount('intel-public.internal')
+        result = self.cmd('deploy intel-public.internal', 'ransomware')
+        self.assertEqual(result['ransomware_ops'], [])
+
+    def test_restart_clears_hidden_progress_for_selected_save_only(self):
+        self.purchase('rootkit-epic')
+        other = SaveSlot.objects.create(user=self.user, position=2, alias='Untouched', market_unlocked=True)
+        response = self.post(self.endpoint('restart'), {'confirmation': 'Hidden'})
+        self.assertEqual(response['backdoors'], [])
+        self.assertEqual(response['ransomware_ops'], [])
+        self.assertFalse(response['market_unlocked'])
+        other.refresh_from_db()
+        self.assertTrue(other.market_unlocked)

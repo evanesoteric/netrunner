@@ -1,0 +1,71 @@
+"""Offline world authoring. No API endpoint exposes this command."""
+import random
+import uuid
+from django.conf import settings
+from django.core.management import BaseCommand, CommandError
+from django.db import transaction, connection
+from game.models import DirectoryServer, GeneratedMission, ContractIdentity
+
+
+class Command(BaseCommand):
+    help = 'Generate durable, unique development missions or directory proxy servers offline.'
+
+    def add_arguments(self, parser):
+        parser.add_argument('kind', choices=['missions', 'servers'])
+        parser.add_argument('--count', type=int, default=1)
+        parser.add_argument('--rank', type=int, choices=range(5), default=0)
+        parser.add_argument('--objective', choices=['retrieve', 'delete'], help='Choose a mission objective instead of random selection.')
+        parser.add_argument('--encrypted', action='store_true', help='Generate encrypted retrieval missions.')
+        parser.add_argument('--exploitable', action='store_true', help='Mark generated servers as ransomware targets.')
+
+    @transaction.atomic
+    def handle(self, *args, **options):
+        if not settings.DEBUG:
+            raise CommandError('Content generation requires DJANGO_DEBUG=1.')
+        count, rank = options['count'], options['rank']
+        if not 1 <= count <= 100:
+            raise CommandError('Choose a count from 1 to 100.')
+        if options['exploitable'] and options['kind'] != 'servers':
+            raise CommandError('--exploitable applies only to servers.')
+        if options['kind'] == 'servers' and (options['objective'] or options['encrypted']):
+            raise CommandError('--objective and --encrypted apply only to missions.')
+        if options['objective'] == 'delete' and options['encrypted']:
+            raise CommandError('Encrypted missions must use the retrieve objective.')
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT pg_advisory_xact_lock(78198421)')
+        rng = random.SystemRandom()
+        used = set(ContractIdentity.objects.values_list('code', flat=True))
+        available = list(set(range(256)) - used)
+        if options['kind'] == 'missions' and count > len(available):
+            raise CommandError(f'Only {len(available)} of the 256 contract IDs remain available.')
+        allocated = rng.sample(available, count) if options['kind'] == 'missions' else []
+        created = []
+        for index in range(count):
+            token = uuid.uuid4().hex
+            x, y = rng.randint(110, 900), rng.randint(90, 390)
+            name = f'{rng.choice(["Vesper", "Halcyon", "Nimbus", "Aster", "Cobalt"])} {rng.choice(["Archive", "Logistics", "Research", "Systems"])}'
+            if options['kind'] == 'servers':
+                key, address = 'srv-' + token, 'node-' + token[:16] + '.internal'
+                data = dict(id=key, name=f'{name}: {token[:6].upper()}', operator=name, address=address,
+                            category='Opportunity' if options['exploitable'] else 'Infrastructure', location='Off-grid',
+                            short_name=name.upper(), x=x, y=y, rank=rank, security=rank + 1,
+                            fee=rng.randint(3, 12), delay=rng.randint(14, 42), latency=rng.randint(4, 18),
+                            exploitable=options['exploitable'], ransom_reward=800 + rank * 200)
+                DirectoryServer.objects.create(key=key, address=address, data=data)
+                created.append(f'{data["name"]} / {address}')
+            else:
+                key, address = token[:12], 'mission-' + token[:16] + '.internal'
+                objective = options['objective'] or ('retrieve' if options['encrypted'] else rng.choice(['retrieve', 'delete']))
+                encrypted = options['encrypted'] or (options['objective'] is None and objective == 'retrieve' and rng.choice([True, False]))
+                filename = f'{token[:6]}.{"enc" if encrypted else "dat"}'
+                description = f'{"Recover" if objective == "retrieve" else "Remove"} {filename} from {address}. Leave no access logs and submit proof through the broker.'
+                data = dict(id=key, target=address, title=f'{name} // {token[:6].upper()}', client='Independent broker',
+                            rank=rank, security=rank + 1, objective=objective, file=filename, encrypted=encrypted,
+                            port=443 if encrypted else 22, size=24 + rank * 32, reward=220 + rank * 200 + rng.randrange(0, 100, 10),
+                            reputation=35 + rank * 10, description=description, x=x, y=y)
+                GeneratedMission.objects.create(key=key, data=data)
+                ContractIdentity.objects.create(template_key=key, code=allocated[index])
+                created.append(f'Contract {allocated[index]} / {data["title"]} / {address}')
+        for line in created:
+            self.stdout.write(line)
+        self.stdout.write(self.style.SUCCESS(f'Created {count} {options["kind"]}. Content is stored in PostgreSQL and included in pg_dump.'))

@@ -46,6 +46,17 @@ for kind, (label, family, usage, base, ram) in TOOL_KINDS.items():
             product_id = f'{kind}-{tier}-{variant}'
             SOFTWARE[product_id] = {'id': product_id, 'category': 'software', 'kind': kind, 'name': f'{family} {tier}.0 {"Micro" if compact else "Pro"}', 'label': label, 'tier': tier, 'power': tier, 'ram': max(1, ram + tier - (2 if compact else 0)), 'speed': 0.8 if compact else 1.3, 'price': int(base * tier ** 2 * (1.4 if compact else 1)), 'usage': usage, 'description': 'Micro uses less RAM but runs slower.' if compact else 'Pro runs faster at the cost of more RAM.'}
 
+# Epic licenses are sold only by the discovered Null Exchange.
+for kind, name, price, usage, description in [
+    ('rootkit', 'Wraith Rootkit', 2400, 'install', 'Persist a backdoor on the current mounted server. Future jumps bypass proxies and remote access logs.'),
+    ('ransomware', 'Eclipse Ransomware', 1800, 'deploy <host>', 'Run up to three simulated operations against amber opportunity servers. Each completes after two minutes.'),
+]:
+    product_id = f'{kind}-epic'
+    SOFTWARE[product_id] = dict(id=product_id, category='software', kind=kind, name=name,
+                               label='Epic software', tier=2, power=5, ram=3, speed=1.3,
+                               price=price, usage=usage, description=description,
+                               black_market=True, grade='epic')
+
 PRODUCTS = {**HARDWARE, **SOFTWARE}
 STARTER_EQUIPMENT = {kind: f'{kind}-1-standard' for kind in FAMILIES}
 STARTER_SOFTWARE = ['mapper-1-standard', 'cracker-1-standard', 'cleaner-1-standard']

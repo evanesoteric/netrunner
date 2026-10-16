@@ -38,6 +38,10 @@ class SaveSlot(models.Model):
     active_contract = models.CharField(max_length=12, blank=True)
     mission_started = models.DateTimeField(null=True, blank=True)
     mission_log = models.JSONField(default=list)
+    backdoors = models.JSONField(default=list)
+    ransomware_ops = models.JSONField(default=list)
+    remote_host = models.JSONField(default=dict)
+    market_unlocked = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     class Meta:
         constraints = [models.UniqueConstraint(fields=['user', 'position'], name='unique_user_save_position'), models.CheckConstraint(condition=Q(position__gte=1, position__lte=3), name='three_save_slots')]
@@ -62,3 +66,14 @@ class ContractIdentity(models.Model):
 
     class Meta:
         constraints = [models.CheckConstraint(condition=Q(code__gte=0, code__lte=255), name='eight_bit_contract_code')]
+
+
+class DirectoryServer(models.Model):
+    key = models.CharField(max_length=40, primary_key=True)
+    address = models.CharField(max_length=100, unique=True)
+    data = models.JSONField()
+
+
+class GeneratedMission(models.Model):
+    key = models.CharField(max_length=12, primary_key=True)
+    data = models.JSONField()

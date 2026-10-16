@@ -7,3 +7,5 @@
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
 
 @media(max-width:700px){.mobile-saves.icon-button{display:grid;margin-top:auto;margin-bottom:25px;padding:12px}.nav-item{font-size:0}}
+
+.epic-card{border-color:#9561be}.epic-card>svg,.epic-card .micro{color:#cf94ff}.epic-market{margin-bottom:24px}.epic-card>code{display:block;color:#cf94ff;font:12px var(--mono);margin-bottom:20px}.opportunity-label{color:#ffbc57!important;font:10px var(--mono)}.directory-card.opportunity{border-color:#72532b}.relay-node.opportunity circle:not(.relay-hit){stroke:#ffbc57;fill:#ffbc57}.relay-node.opportunity text{fill:#ffbc57}.ransomware-panel{margin-top:24px}.ransomware-row{display:flex;justify-content:space-between;gap:12px;padding:16px;flex-wrap:wrap;font:11px var(--mono);color:#ffbc57}.ransomware-row code{overflow-wrap:anywhere}.epic-card .product-footer{flex-wrap:wrap;gap:12px}

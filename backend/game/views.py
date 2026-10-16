@@ -8,8 +8,9 @@ from django.http import JsonResponse
 from django.utils import timezone
 from django.views.decorators.csrf import ensure_csrf_cookie
 from .contracts import codes, public_job
+from .world import all_contracts, get_contract, all_servers, session_target
 from .models import SaveSlot, LedgerEntry
-from .catalog import CONTRACTS, CONTRACT_BY_ID, CURRENCY, RANKS, THRESHOLDS, PRODUCTS, BUILTIN_APPS, RELAYS, HOME_NODE
+from .catalog import CURRENCY, RANKS, THRESHOLDS, PRODUCTS, BUILTIN_APPS, HOME_NODE
 from .mechanics import GameError, hardware, ram_used, route_stats, available_at, trace_remaining, settle, launch, trade, validate_route, execute, edit_directory, reserve, fail
 
 def api(methods, authenticated=True):
@@ -42,9 +43,11 @@ def text_field(data, key, maximum):
 
 def serialize(slot, detailed=False):
     mapping = codes()
+    servers = all_servers(slot)
     monitor = PRODUCTS.get(slot.running_apps.get('monitor', ''))
-    job = CONTRACT_BY_ID.get(slot.active_contract)
-    remaining = trace_remaining(slot) if monitor and job and monitor['power'] >= job['security'] else None
+    job = get_contract(slot.active_contract)
+    target = session_target(slot)
+    remaining = trace_remaining(slot) if monitor and target and monitor['power'] >= target['security'] else None
     data = {
         'id': slot.id, 'position': slot.position, 'alias': slot.alias,
         'balance': slot.balance, 'reputation': slot.reputation, 'rank': slot.rank,
@@ -53,13 +56,17 @@ def serialize(slot, detailed=False):
         'rank_floor': THRESHOLDS[slot.rank], 'completed': slot.completed,
         'active_contract': public_job(job, mapping),
         'connected': bool(slot.mission_started),
+        'remote_target': target['target'] if target and slot.mission_started else None,
+        'stealth_session': bool(slot.remote_host.get('_backdoor')),
+        'remote_node': {key: target[key] for key in ('target', 'x', 'y')} if target and slot.mission_started else None,
+        'market_unlocked': slot.market_unlocked,
         'mission_log': slot.mission_log,
         'trace_remaining': remaining if 'monitor' in slot.running_apps else None,
         'server_time': timezone.now().isoformat(),
     }
     if detailed:
         contracts = []
-        for job in CONTRACTS:
+        for job in all_contracts():
             if abs(job['rank'] - slot.rank) <= 1:
                 ready = available_at(slot, job['id'])
                 contracts.append({**public_job(job, mapping), 'available_at': ready.isoformat() if ready else None})
@@ -74,8 +81,12 @@ def serialize(slot, detailed=False):
                 'ram': BUILTIN_APPS[value]['ram'] if value in BUILTIN_APPS else PRODUCTS[value]['ram'],
                 'console': BUILTIN_APPS[value]['console'] if value in BUILTIN_APPS else True,
             } for key, value in slot.running_apps.items()],
-            'ram_used': ram_used(slot), 'catalog': list(PRODUCTS.values()),
-            'builtins': list(BUILTIN_APPS.values()), 'relays': [server for server in RELAYS if server['id'] in slot.atlas_nodes], 'network_directory': RELAYS, 'atlas_nodes': slot.atlas_nodes, 'home_node': HOME_NODE,
+            'ram_used': ram_used(slot),
+            'catalog': [item for item in PRODUCTS.values() if not item.get('black_market') or item['id'] in slot.installed_software],
+            'black_market_catalog': [item for item in PRODUCTS.values() if item.get('black_market')] if slot.market_unlocked else [],
+            'backdoors': [{key: value for key, value in entry.items() if key != 'id'} for entry in slot.backdoors] if 'rootkit-epic' in slot.installed_software else [],
+            'ransomware_ops': slot.ransomware_ops,
+            'builtins': list(BUILTIN_APPS.values()), 'relays': [server for server in servers if server['id'] in slot.atlas_nodes], 'network_directory': servers, 'atlas_nodes': slot.atlas_nodes, 'home_node': HOME_NODE,
             'proxy_route': slot.proxy_route, 'route_stats': route_stats(slot),
             'ledger': list(slot.ledger.values('id', 'amount', 'description', 'created_at')[:30]),
         })
@@ -84,7 +95,7 @@ def serialize(slot, detailed=False):
 @ensure_csrf_cookie
 @api(['GET'], authenticated=False)
 def session(request):
-    return JsonResponse({'user': {'username': request.user.username} if request.user.is_authenticated else None, 'currency': CURRENCY, 'ranks': RANKS, 'version': '0.5.0', 'server_time': timezone.now().isoformat()})
+    return JsonResponse({'user': {'username': request.user.username} if request.user.is_authenticated else None, 'currency': CURRENCY, 'ranks': RANKS, 'version': '0.6.0', 'server_time': timezone.now().isoformat()})
 
 @api(['POST'], authenticated=False)
 def register(request):
@@ -220,7 +231,7 @@ def restart(request, slot_id):
     if request.data.get('confirmation') != slot.alias:
         raise GameError('Type the runner alias exactly to confirm restarting this slot.')
     fresh = SaveSlot(user=request.user, alias=slot.alias, position=slot.position)
-    for field in ['balance', 'reputation', 'completed', 'equipment', 'owned_hardware', 'installed_software', 'running_apps', 'proxy_route', 'atlas_nodes', 'active_contract', 'mission_started', 'mission_state', 'mission_log', 'contract_cooldowns']:
+    for field in ['balance', 'reputation', 'completed', 'equipment', 'owned_hardware', 'installed_software', 'running_apps', 'proxy_route', 'atlas_nodes', 'active_contract', 'mission_started', 'mission_state', 'mission_log', 'contract_cooldowns', 'backdoors', 'ransomware_ops', 'remote_host', 'market_unlocked']:
         setattr(slot, field, getattr(fresh, field))
     slot.created_at = timezone.now()
     slot.save()
@@ -245,11 +256,26 @@ def contract_action(request, slot_id):
     if action == 'accept':
         reserve(slot, code)
     elif action == 'abort':
-        current = CONTRACT_BY_ID.get(slot.active_contract)
+        current = get_contract(slot.active_contract)
         if not current or public_job(current)['id'] != code:
             raise GameError('That assignment is no longer reserved. Refresh the broker.')
         fail(slot, 'Assignment abandoned.')
     else:
         raise GameError('Choose accept or abort.')
+    slot.save()
+    return JsonResponse(serialize(slot, True))
+
+
+@api(['POST'])
+@transaction.atomic
+def backdoor_connect(request, slot_id):
+    from .operations import connect_target
+    slot = SaveSlot.objects.select_for_update().get(pk=slot_id, user=request.user)
+    settle(slot)
+    target = text_field(request.data, 'target', 100)
+    launch(slot, 'terminal')
+    message = connect_target(slot, target, backdoor=True)
+    from .mechanics import log
+    log(slot, 'terminal', message)
     slot.save()
     return JsonResponse(serialize(slot, True))

@@ -8,6 +8,8 @@ The sidebar now includes a separate **Workspace**. All previous screens and laun
 
 Use **Add a panel** to open built-in services, an owned software variant, Field Notes, Server Histories, or an unlocked black-market/backdoor service. Adding a tool launches it in place; adding an already-running tool reuses its process. Atlas routing, broker acceptance/abort, the exchange, bank commands, notes, histories, and Wraith connections all work inside panels. The main app's terminal launcher and process dock also open/focus panels while you are on Workspace.
 
+The Workspace Atlas is map-only and fills its panel. Click saved server markers in route order (click again to remove a hop); numbered markers and connecting lines show the chain. Commit the route on the map. Directory management remains available on the full Atlas screen.
+
 On desktop, drag a panel's grip to move it or drag its lower corner to resize. Panels snap to a 12-column grid; overlapping panels move down into free space. Focus a grip or resize handle and use arrow keys for the same controls. Panel positions, sizes, visibility, and preferred software variants autosave to PostgreSQL for that save. Restore starter arrangement resets the panel arrangement without stopping processes.
 
 **Remove panel** hides its window and leaves its process running. **Stop** closes the process and frees RAM. Launch visible tools stops at a launch failure rather than ignoring a RAM limit. Your existing hardware, ownership, trace, contract, and payment rules still apply: the workspace adds no free capabilities and does not automate mission steps.

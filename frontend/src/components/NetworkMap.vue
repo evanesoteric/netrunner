@@ -1,7 +1,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import { Network, ArrowUp, ArrowDown, X, Plus, Minus, RotateCcw } from 'lucide-vue-next'
-const props = defineProps({ slot: Object, busy: Boolean })
+const props = defineProps({ slot: Object, busy: Boolean, mapOnly: Boolean })
 const emit = defineEmits(['save', 'directory'])
 const view = ref('map'), search = ref(''), category = ref('all'), savedOnly = ref(false)
 const categories = computed(() => [...new Set(props.slot.network_directory.map(server => server.category))])
@@ -32,17 +32,19 @@ function resetView() { zoom.value = 1; pan.value = { x: 0, y: 0 } }
 function startDrag(event) {
   if (event.target.closest('[role="button"]')) return
   const bounds = event.currentTarget.getBoundingClientRect()
-  drag.value = { x: event.clientX, y: event.clientY, origin: { ...pan.value }, factor: 1000 / bounds.width }
+  drag.value = { x: event.clientX, y: event.clientY, origin: { ...pan.value }, factor: 1 / Math.min(bounds.width / 1000, bounds.height / 470) }
   event.currentTarget.setPointerCapture(event.pointerId)
 }
 function moveDrag(event) { if (drag.value) pan.value = { x: drag.value.origin.x + (event.clientX - drag.value.x) * drag.value.factor, y: drag.value.origin.y + (event.clientY - drag.value.y) * drag.value.factor } }
 </script>
 
 <template>
+  <template v-if="!mapOnly">
   <div class="eyebrow">ATLAS / GLOBAL ROUTING DESK</div><div class="page-heading"><div><h1>Take the long way around<span>_</span></h1><p>Chain named servers between your gateway and the target. Manage the servers visible on your map in the network directory.</p></div><span class="badge">{{ route.length }} / {{ slot.equipment.gateway.hops }} HOPS</span></div>
   <div class="atlas-tabs" aria-label="Atlas views"><button :aria-pressed="view === 'map'" :class="{ selected: view === 'map' }" @click="view = 'map'">Routing map <span>{{ slot.atlas_nodes.length }} SERVERS</span></button><button :aria-pressed="view === 'directory'" :class="{ selected: view === 'directory' }" @click="view = 'directory'">Network directory <span>{{ slot.network_directory.length }} LISTED</span></button></div>
-  <template v-if="view === 'map'">
-  <div class="atlas-layout"><section class="panel atlas-panel"><div class="panel-title"><span><Network :size="16" /> WORLD NETWORK</span><span class="panel-meta">{{ slot.connected ? 'ROUTE LOCKED / CONNECTED' : changed ? 'UNCOMMITTED ROUTE' : 'ROUTE COMMITTED' }}</span></div>
+  </template>
+  <template v-if="mapOnly || view === 'map'">
+  <div class="atlas-layout" :class="{ 'atlas-map-only': mapOnly }"><section class="panel atlas-panel"><div v-if="!mapOnly" class="panel-title"><span><Network :size="16" /> WORLD NETWORK</span><span class="panel-meta">{{ slot.connected ? 'ROUTE LOCKED / CONNECTED' : changed ? 'UNCOMMITTED ROUTE' : 'ROUTE COMMITTED' }}</span></div>
       <div class="atlas-map"><svg viewBox="0 0 1000 470" aria-label="Global proxy routing map" @pointerdown="startDrag" @pointermove="moveDrag" @pointerup="drag = null" @pointercancel="drag = null">
         <defs><pattern id="atlas-grid" width="50" height="47" patternUnits="userSpaceOnUse"><path d="M 50 0 L 0 0 0 47" fill="none" stroke="#1b3428" stroke-width=".6" /></pattern><radialGradient id="atlas-glow"><stop offset="0" stop-color="#163d29" /><stop offset="1" stop-color="#08110d" /></radialGradient></defs>
         <rect width="1000" height="470" fill="url(#atlas-glow)" /><rect width="1000" height="470" fill="url(#atlas-grid)" />
@@ -55,14 +57,20 @@ function moveDrag(event) { if (drag.value) pan.value = { x: drag.value.origin.x 
           </g>
           <g v-if="destination" class="map-target" :transform="`translate(${destination.x} ${destination.y})`"><circle r="11" /><path d="M-16 0H16M0-16V16" /><text x="16" y="-16">{{ destination.target.toUpperCase() }}</text></g>
         </g>
-      </svg><div class="map-controls"><button aria-label="Zoom in" @click="zoom = Math.min(2.5, zoom + .25)"><Plus :size="15" /></button><button aria-label="Zoom out" @click="zoom = Math.max(.75, zoom - .25)"><Minus :size="15" /></button><button aria-label="Reset map view" @click="resetView"><RotateCcw :size="14" /></button></div><div class="map-legend"><span><i></i> SERVER</span><span><i class="selected-dot"></i> SELECTED HOP</span><span><i class="target-dot"></i> TARGET</span><span class="opportunity-label">◆ OPPORTUNITY</span></div></div>
-      <div class="panel-bottom">Drag to pan. Select a saved server to append or remove a proxy hop. Longer routes buy time but cost more CPH and add latency.</div>
+      </svg><div v-if="mapOnly" class="map-route-controls">
+        <span role="status">{{ slot.connected ? 'ROUTE LOCKED' : changed ? 'UNCOMMITTED' : 'COMMITTED' }} · {{ nodes.length }}/{{ slot.equipment.gateway.hops }} HOPS</span>
+        <small>{{ estimate.fee }} CPH / +{{ estimate.delay }}s</small>
+        <button class="button primary" :disabled="busy || slot.connected || !changed" @click="emit('save', [...route])">Commit route</button>
+      </div><div class="map-controls"><button aria-label="Zoom in" @click="zoom = Math.min(2.5, zoom + .25)"><Plus :size="15" /></button><button aria-label="Zoom out" @click="zoom = Math.max(.75, zoom - .25)"><Minus :size="15" /></button><button aria-label="Reset map view" @click="resetView"><RotateCcw :size="14" /></button></div><div class="map-legend"><span><i></i> SERVER</span><span><i class="selected-dot"></i> SELECTED HOP</span><span><i class="target-dot"></i> TARGET</span><span class="opportunity-label">◆ OPPORTUNITY</span></div></div>
+      <div v-if="!mapOnly" class="panel-bottom">Drag to pan. Select a saved server to append or remove a proxy hop. Longer routes buy time but cost more CPH and add latency.</div>
     </section>
-    <section class="panel route-panel"><div class="panel-title"><span>PROXY CHAIN</span><span class="panel-meta">ORDER MATTERS</span></div><div class="route-origin">ORIGIN / YOUR GATEWAY<small>{{ slot.equipment.gateway.name }}</small></div><ol class="route-order"><li v-for="(node, index) in nodes" :key="node.id"><div><strong>{{ node.name }}</strong><small class="server-address">{{ node.address }}</small><small>+{{ node.delay }}s / {{ node.fee }} CPH</small></div><button :disabled="busy || slot.connected || index === 0" :aria-label="`Move ${node.name} earlier`" @click="move(index, -1)"><ArrowUp :size="13" /></button><button :disabled="busy || slot.connected || index === nodes.length - 1" :aria-label="`Move ${node.name} later`" @click="move(index, 1)"><ArrowDown :size="13" /></button><button :disabled="busy || slot.connected" :aria-label="`Remove ${node.name}`" @click="toggle(node)"><X :size="13" /></button></li></ol><p v-if="!nodes.length" class="empty-route">Direct connection. No proxies between you and the target.</p><div class="route-destination">DESTINATION<small>{{ destination?.target || 'No contract reserved' }}</small></div><div class="route-summary"><span>Connection lease<strong>{{ estimate.fee }} CPH</strong></span><span>Added trace delay<strong>+{{ estimate.delay }}s</strong></span><span>Route latency<strong>{{ estimate.latency }} units</strong></span></div><button class="button primary wide" :disabled="busy || slot.connected || !changed" @click="emit('save', [...route])">Commit route <Network :size="15" /></button></section>
+    <section v-if="!mapOnly" class="panel route-panel"><div class="panel-title"><span>PROXY CHAIN</span><span class="panel-meta">ORDER MATTERS</span></div><div class="route-origin">ORIGIN / YOUR GATEWAY<small>{{ slot.equipment.gateway.name }}</small></div><ol class="route-order"><li v-for="(node, index) in nodes" :key="node.id"><div><strong>{{ node.name }}</strong><small class="server-address">{{ node.address }}</small><small>+{{ node.delay }}s / {{ node.fee }} CPH</small></div><button :disabled="busy || slot.connected || index === 0" :aria-label="`Move ${node.name} earlier`" @click="move(index, -1)"><ArrowUp :size="13" /></button><button :disabled="busy || slot.connected || index === nodes.length - 1" :aria-label="`Move ${node.name} later`" @click="move(index, 1)"><ArrowDown :size="13" /></button><button :disabled="busy || slot.connected" :aria-label="`Remove ${node.name}`" @click="toggle(node)"><X :size="13" /></button></li></ol><p v-if="!nodes.length" class="empty-route">Direct connection. No proxies between you and the target.</p><div class="route-destination">DESTINATION<small>{{ destination?.target || 'No contract reserved' }}</small></div><div class="route-summary"><span>Connection lease<strong>{{ estimate.fee }} CPH</strong></span><span>Added trace delay<strong>+{{ estimate.delay }}s</strong></span><span>Route latency<strong>{{ estimate.latency }} units</strong></span></div><button class="button primary wide" :disabled="busy || slot.connected || !changed" @click="emit('save', [...route])">Commit route <Network :size="15" /></button></section>
   </div>
+  <template v-if="!mapOnly">
   <h2 class="section-heading">SAVED SERVERS <span>SELECT TO APPEND A PROXY HOP</span></h2>
   <div v-if="!slot.relays.length" class="empty-state">Your Atlas is empty. Add servers from the network directory to begin building a route.</div>
   <div class="relay-directory"><button v-for="node in slot.relays" :key="node.id" :aria-label="`${route.includes(node.id) ? 'Remove hop' : 'Add hop'} ${node.name}`" :class="['panel', { selected: route.includes(node.id) }]" :disabled="busy || slot.connected || (node.rank > slot.rank && !route.includes(node.id)) || (!route.includes(node.id) && route.length >= slot.equipment.gateway.hops)" @click="toggle(node)"><span>{{ node.name }}<small>{{ node.address }}</small></span><strong>{{ node.rank > slot.rank && !route.includes(node.id) ? 'CLEARANCE LOCKED' : route.includes(node.id) ? `HOP ${route.indexOf(node.id) + 1}` : `+${node.delay}s / ${node.fee} CPH` }}</strong></button></div>
+  </template>
   </template>
   <section v-else class="network-directory">
     <div class="directory-heading"><div><h2>Network directory</h2><p>Add servers to your personal Atlas. Removing a server also removes it from your committed proxy chain.</p></div><span class="badge">{{ slot.atlas_nodes.length }} SAVED</span></div>

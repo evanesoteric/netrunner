@@ -2,6 +2,8 @@
 import { computed, ref, nextTick, onMounted, onUnmounted } from 'vue'
 import { Terminal, Network, BriefcaseBusiness, Cpu, Landmark, Layers3, ArrowUpRight, ArrowRight, ChevronRight, Radio, ShieldCheck, LogOut, Plus, X, Check, Globe, Fingerprint, Activity, Grid2X2, Play, LockKeyhole, NotebookPen } from 'lucide-vue-next'
 import WorkspaceView from './components/WorkspaceView.vue'
+import PasswordBreaker from './components/PasswordBreaker.vue'
+import ServerLogin from './components/ServerLogin.vue'
 import BrokerView from './components/BrokerView.vue'
 import BackdoorsView from './components/BackdoorsView.vue'
 import TerminalConsole from './components/TerminalConsole.vue'
@@ -123,6 +125,14 @@ async function closeApplication(application, stay = false, expectedSlot = null) 
 async function sendCommand(command, application) {
   return act(async () => { updateSlot(await api(`slots/${slot.value.id}/command/`, { command, application })); return true })
 }
+async function breakerAction(action, expectedSlot) {
+  if (slot.value?.id !== expectedSlot) return false
+  return act(async () => { updateSlot(await api(`slots/${expectedSlot}/password-breaker/`, { action })); return true })
+}
+async function openCracker() {
+  const product = slot.value.running_apps.find(app => app.id === 'cracker')?.product_id || slot.value.installed_software.find(id => slot.value.catalog.some(item => item.id === id && item.kind === 'cracker'))
+  if (product) await launchApplication(product)
+}
 async function jumpBackdoor(target) {
   await act(async () => {
     updateSlot(await api(`slots/${slot.value.id}/backdoors/`, { target }))
@@ -159,7 +169,7 @@ async function refreshTrace() {
 }
 onMounted(async () => {
   clock = setInterval(() => { now.value = Date.now() }, 1000)
-  poller = setInterval(refreshTrace, 5000)
+  poller = setInterval(refreshTrace, 1000)
   try { const session = await api('session/'); user.value = session.user; ranks.value = session.ranks; currency.value = session.currency; if (user.value) await loadSaves() } catch (e) { error.value = e.message } finally { loading.value = false }
 })
 onUnmounted(() => { clearInterval(clock); clearInterval(poller) })
@@ -169,7 +179,7 @@ onUnmounted(() => { clearInterval(clock); clearInterval(poller) })
   <div class="app-shell">
     <aside class="sidebar">
       <a class="brand" href="#" @click.prevent="page = 'overview'" aria-label="Netrunner home"><span class="brand-icon"><Terminal :size="23" /></span><span>netrunner<span class="brand-dot">_</span><small>INDEPENDENT NETWORK ACCESS</small></span></a>
-      <div class="workspace-label">WORKSPACE <span>V.0.8</span></div>
+      <div class="workspace-label">WORKSPACE <span>V.0.9</span></div>
       <nav aria-label="Main navigation">
         <button v-for="item in nav" :key="item.id" :aria-label="item.label" :class="['nav-item', { active: page === item.id }]" @click="navigate(item)" :disabled="!slot || busy" :aria-current="page === item.id ? 'page' : undefined"><component :is="item.icon" :size="18" /><span>{{ item.label }}</span><span v-if="item.id === 'broker' && slot" class="nav-count">{{ slot.contracts.length }}</span><span v-if="item.id === 'terminal' && slot?.active_contract" class="live-dot"></span></button>
       </nav>
@@ -204,7 +214,7 @@ onUnmounted(() => { clearInterval(clock); clearInterval(poller) })
         </template>
 
         <template v-else>
-          <div v-if="slot.connected" class="remote-status"><Radio :size="15" /><span>REMOTE LINK / {{ slot.remote_target }}</span><strong>{{ slot.stealth_session ? 'WRAITH / LOGGING SUPPRESSED' : remaining == null ? (slot.running_apps.some(app => app.id === 'monitor') ? 'TRACE UNRESOLVED' : 'TRACE MONITOR OFFLINE') : `TRACE ${remaining}s` }}</strong></div>
+          <div v-if="slot.connected" class="remote-status"><Radio :size="15" /><span>REMOTE LINK / {{ slot.remote_target }}</span><strong>{{ slot.stealth_session ? 'WRAITH / LOGGING SUPPRESSED' : !slot.authenticated ? 'LOGIN REQUIRED / TRACE INACTIVE' : remaining == null ? (slot.running_apps.some(app => app.id === 'monitor') ? 'TRACE UNRESOLVED' : 'TRACE MONITOR OFFLINE') : `TRACE ${remaining}s` }}</strong></div>
           <div v-if="slot.running_apps.length" class="application-dock" aria-label="Running applications"><div v-for="app in slot.running_apps" :key="app.id" :class="{ selected: activeConsole === app.id && !['overview', 'launcher', 'workspace'].includes(page) }"><button @click="activate(app.id)"><span class="green-dot"></span>{{ app.name }}</button><button :aria-label="`Stop ${app.name}`" :disabled="busy" @click="closeApplication(app.id)"><X :size="12" /></button></div></div>
           <template v-if="page === 'overview'">
             <div class="eyebrow"><span class="live-dot"></span> PERSONAL DESKTOP / SLOT 0{{ slot.position }}</div>
@@ -219,8 +229,10 @@ onUnmounted(() => { clearInterval(clock); clearInterval(poller) })
           <ExchangeView v-else-if="page === 'exchange'" :slot="slot" :busy="busy" @trade="trade" />
           <BrokerView v-else-if="page === 'broker'" :slot="slot" :busy="busy" :now="now" :offset="serverOffset" :ranks="ranks" @action="contractAction" />
           <template v-else-if="page === 'console' && currentProcess">
-            <div class="eyebrow">OPERATIONS / {{ activeConsole.toUpperCase() }}</div><div class="page-heading"><div><h1>{{ currentProcess.name }}<span>_</span></h1><p>{{ currentProcess.ram }} GB allocated. Commands execute inside this application's console.</p></div><span class="badge">{{ slot.connected ? 'REMOTE SESSION' : 'LOCAL SESSION' }}</span></div>
-            <TerminalConsole :slot="slot" :application="activeConsole" :busy="busy" :send="sendCommand" />
+            <div class="eyebrow">OPERATIONS / {{ activeConsole.toUpperCase() }}</div><div class="page-heading"><div><h1>{{ currentProcess.name }}<span>_</span></h1><p>{{ currentProcess.ram }} GB allocated. {{ activeConsole === 'cracker' ? 'Graphical password breaker.' : "Commands execute inside this application’s console." }}</p></div><span class="badge">{{ slot.connected ? 'REMOTE SESSION' : 'LOCAL SESSION' }}</span></div>
+            <PasswordBreaker v-if="activeConsole === 'cracker'" :slot="slot" :busy="busy" :action="breakerAction" />
+            <ServerLogin v-if="activeConsole === 'terminal'" :slot="slot" :busy="busy" @open-cracker="openCracker" />
+            <TerminalConsole v-if="activeConsole !== 'cracker'" :slot="slot" :application="activeConsole" :busy="busy" :send="sendCommand" />
           </template>
           <template v-else-if="page === 'blackmarket' && slot.market_unlocked">
             <BlackMarket :slot="slot" :busy="busy" @trade="trade" />
@@ -231,7 +243,7 @@ onUnmounted(() => { clearInterval(clock); clearInterval(poller) })
             <TerminalConsole :slot="slot" application="bank" :busy="busy" :send="sendCommand" />
             <section class="panel ledger bank-ledger"><div class="panel-title"><span><Activity :size="16" /> TRANSACTION HISTORY</span><span class="panel-meta">LATEST 30 ENTRIES</span></div><div class="ledger-row" v-for="entry in slot.ledger" :key="entry.id"><div><span class="transaction-icon"><ArrowUpRight :size="16" /></span><strong>{{ entry.description }}</strong></div><time>{{ new Date(entry.created_at).toISOString().slice(0,16).replace('T',' ') }}</time><strong :class="entry.amount > 0 ? 'positive' : 'negative'">{{ entry.amount > 0 ? '+' : '−' }}{{ money(Math.abs(entry.amount)) }} <small>CPH</small></strong></div></section>
           </template>
-          <KeepAlive><WorkspaceView v-if="page === 'workspace'" ref="workspaceRef" :key="`${user.username}:${slot.id}:${slot.created_at}`" :slot="slot" :username="user.username" :busy="busy" :api="api" :send="sendCommand" :launch="(product, id) => launchApplication(product, true, id)" :close="(app, id) => closeApplication(app, true, id)" :now="now" :offset="serverOffset" :ranks="ranks" @route="saveRoute" @directory="editDirectory" @trade="trade" @contract="contractAction" @jump="jumpBackdoor" /></KeepAlive>
+          <KeepAlive><WorkspaceView v-if="page === 'workspace'" ref="workspaceRef" :key="`${user.username}:${slot.id}:${slot.created_at}`" :slot="slot" :username="user.username" :busy="busy" :api="api" :send="sendCommand" :launch="(product, id) => launchApplication(product, true, id)" :close="(app, id) => closeApplication(app, true, id)" :now="now" :offset="serverOffset" :ranks="ranks" :breaker-action="breakerAction" @open-cracker="openCracker" @route="saveRoute" @directory="editDirectory" @trade="trade" @contract="contractAction" @jump="jumpBackdoor" /></KeepAlive>
           <KeepAlive><FieldNotes v-if="page === 'notes'" :key="`${user.username}:${slot.id}:${slot.created_at}`" :slot-id="slot.id" :username="user.username" :api="api" /></KeepAlive>
           <section v-if="slot.ransomware_ops.length" class="panel ransomware-panel"><div class="panel-title"><span>ECLIPSE / ACTIVE INSTANCES</span><span class="panel-meta">{{ slot.ransomware_ops.length }} / 3</span></div><div v-for="operation in slot.ransomware_ops" :key="operation.target" class="ransomware-row"><code>{{ operation.target }}</code><span>{{ Math.max(0, Math.ceil((Date.parse(operation.due_at) - now - serverOffset) / 1000)) }}s</span><strong>{{ operation.reward }} CPH</strong></div></section>
           <div v-if="restartOpen" class="modal-backdrop" @click.self="restartOpen = false"><section class="panel restart-dialog" role="dialog" aria-modal="true" aria-labelledby="restart-title"><div class="panel-title"><span>RUNNER RESTART</span><button class="icon-button" @click="restartOpen = false" aria-label="Cancel restart"><X :size="17" /></button></div><form @submit.prevent="restartRunner"><h2 id="restart-title">Start over in slot 0{{ slot.position }}?</h2><p>This erases {{ slot.alias }}'s balance, reputation, contracts, equipment, routes, notes, server histories, workspace arrangement, and transaction history. Your account and other save slots stay intact.</p><label for="restart-confirmation">TYPE {{ slot.alias }} TO CONFIRM</label><input id="restart-confirmation" v-model="restartConfirmation" autocomplete="off" required /><div class="dialog-actions"><button type="button" class="button secondary" @click="restartOpen = false">Cancel</button><button class="button primary" :disabled="busy || restartConfirmation !== slot.alias">Erase progress and restart</button></div></form></section></div>

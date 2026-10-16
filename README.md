@@ -83,7 +83,7 @@ Stop with **Ctrl+C**, then `docker compose down`. Start again with `docker compo
 | Save slots | Create, select, or restart one of three independent runners. |
 | Null Exchange / Backdoored Servers | Access hidden software and installed backdoor connections once unlocked. |
 
-The terminal is available from the top bar. Specialized tools have their own consoles: **Cartograph** scans, **Lockpick** cracks, **Rosetta** decrypts, **Ashfall** clears logs, and **Tripwire** monitors traces.
+The terminal is available from the top bar. **Lockpick** is a graphical password breaker with a rolling decoder display. Other tools have their own consoles: **Cartograph** scans, **Rosetta** decrypts, **Ashfall** clears logs, and **Tripwire** monitors traces.
 
 ## More information
 

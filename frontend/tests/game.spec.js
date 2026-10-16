@@ -27,6 +27,7 @@ async function sidebar(page, name) {
   await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name, exact: true }).click()
 }
 async function cmd(page, command, expected) {
+  if (command.startsWith('crack ')) { await breakPassword(page); return }
   const input = page.getByRole('textbox', { name: 'Terminal command', exact: true })
   await expect(input).toBeFocused()
   await input.fill(command)
@@ -36,6 +37,14 @@ async function cmd(page, command, expected) {
   await expect(input).toHaveValue('')
   await expect(input).toBeFocused()
   if (expected) await expect(page.getByRole('log')).toContainText(expected)
+}
+async function breakPassword(page, scope = page) {
+  const breaker = scope.getByRole('region', { name: 'Lockpick password breaker', exact: true })
+  await expect(breaker).toBeVisible()
+  await expect(breaker.getByRole('textbox')).toHaveCount(0)
+  await breaker.getByRole('button', { name: 'Break password', exact: true }).click()
+  await expect(breaker.getByRole('status')).toHaveText('BREAKING PASSWORD')
+  await expect(breaker.getByRole('status')).toHaveText('ACCESS GRANTED', { timeout: 30000 })
 }
 async function post(page, path, payload) {
   const cookies = await page.context().cookies()
@@ -76,7 +85,7 @@ test('manual tools, proxy route, terminal focus, delivery, equipment and three s
   await cmd(page, 'scan helix-0.internal', '22/tcp  OPEN  auth-v1')
   await process(page, 'Local terminal')
   await cmd(page, 'connect helix-0.internal', 'via 2 proxies')
-  await expect(page.locator('.remote-status')).toContainText('TRACE MONITOR OFFLINE')
+  await expect(page.locator('.remote-status')).toContainText('TRACE INACTIVE')
   await process(page, 'Atlas routing desk')
   await expect(page.getByRole('button', { name: 'Remove hop Intel Corp: Public Access', exact: true })).toBeDisabled()
   await launch(page, 'Lockpick 1.0 Pro')
@@ -528,7 +537,7 @@ test('workspace runs the whole contract loop with simultaneous tools and saves a
   await expect(page.locator('.workspace-save-status')).toHaveText('Layout saved')
   await expect(page.locator('.workspace-window')).toHaveCount(4)
   await page.getByRole('button', { name: 'Launch visible tools', exact: true }).click()
-  for (const panelId of ['terminal', 'mapper', 'cracker']) {
+  for (const panelId of ['terminal', 'mapper']) {
     await expect(page.locator(`[data-workspace-window="${panelId}"]`).getByRole('textbox', { name: / command$/ })).toBeVisible()
   }
   await page.route('**/command/', async route => {
@@ -567,7 +576,7 @@ test('workspace runs the whole contract loop with simultaneous tools and saves a
   await workspaceCommand(page, 'terminal', 'connect helix-0.internal', 'via 1 proxies')
   await expect(atlas.getByRole('button', { name: 'Commit route', exact: true })).toBeDisabled()
   await expect(intel).toHaveAttribute('aria-disabled', 'true')
-  await workspaceCommand(page, 'cracker', 'crack 22', 'Remote filesystem mounted')
+  await breakPassword(page, page.locator('[data-workspace-window="cracker"]'))
   await workspaceCommand(page, 'terminal', 'get research.dat', 'Copied research.dat')
   await page.getByLabel('Workspace panel', { exact: true }).selectOption('cleaner-1-standard')
   await page.getByRole('button', { name: 'Add panel', exact: true }).click()
@@ -650,4 +659,48 @@ test('workspace rejects conflicting arrangements and restores panels without cha
   await expect(page.locator('[data-workspace-window="notes"] .notes-status')).toHaveText('Saved')
   await sidebar(page, 'Field Notes')
   await expect(page.getByRole('textbox', { name: 'FIELD NOTES', exact: true })).toHaveValue('Workspace notebook is the same notebook.')
+})
+
+test('graphical password breaker cancels, persists across reloads and starts trace after login', async ({ page }) => {
+  test.setTimeout(60000)
+  await register(page, 'Decoder')
+  const id = await contractId(page)
+  await page.getByRole('button', { name: 'Terminal launcher', exact: true }).click()
+  await cmd(page, `accept ${id}`, 'Reservation confirmed')
+  await cmd(page, 'connect helix-0.internal', 'Server login awaiting authentication')
+  const login = page.getByRole('region', { name: 'Remote server login', exact: true })
+  await expect(login).toContainText('TRACE INACTIVE')
+  await login.getByRole('button', { name: 'Open password breaker' }).click()
+  let breaker = page.getByRole('region', { name: 'Lockpick password breaker', exact: true })
+  await expect(breaker.getByRole('textbox')).toHaveCount(0)
+  await expect(breaker.getByRole('button', { name: 'Break password', exact: true })).toBeDisabled()
+  await launch(page, 'Cartograph 1.0 Pro')
+  await cmd(page, 'scan helix-0.internal', 'Scan complete')
+  await process(page, 'Lockpick 1.0 Pro')
+  await breaker.getByRole('button', { name: 'Break password', exact: true }).click()
+  await expect(breaker.getByRole('status')).toHaveText('BREAKING PASSWORD')
+  await expect(breaker.getByRole('region', { name: 'Remote server login', exact: true })).toContainText('TRACE INACTIVE')
+  const before = await breaker.locator('.decoder-cells').innerText()
+  await expect.poll(() => breaker.locator('.decoder-cells').innerText()).not.toBe(before)
+  await breaker.getByRole('button', { name: 'Cancel password breaker', exact: true }).click()
+  await expect(breaker.getByRole('status')).toHaveText('ATTEMPT CANCELLED')
+  await breaker.getByRole('button', { name: 'Break password', exact: true }).click()
+  const slots = (await (await page.request.get('/api/slots/')).json()).slots
+  const read = async () => (await (await page.request.get(`/api/slots/${slots[0].id}/`)).json())
+  const pending = await read()
+  expect(pending.authenticated).toBe(false)
+  expect(pending.trace_active).toBe(false)
+  await page.screenshot({ path: '../.local/password-breaker-desktop.png', fullPage: true })
+  await page.reload()
+  await process(page, 'Lockpick 1.0 Pro')
+  breaker = page.getByRole('region', { name: 'Lockpick password breaker', exact: true })
+  const restored = await read()
+  expect(restored.password_break.id).toBe(pending.password_break.id)
+  expect(restored.balance).toBe(pending.balance)
+  await expect(breaker.getByRole('status')).toHaveText('ACCESS GRANTED', { timeout: 30000 })
+  expect((await read()).trace_active).toBe(true)
+  await page.setViewportSize({ width: 390, height: 844 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy()
+  await expect(breaker.getByRole('status')).toBeVisible()
+  await page.screenshot({ path: '../.local/password-breaker-mobile.png', fullPage: true })
 })

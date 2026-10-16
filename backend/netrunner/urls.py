@@ -9,6 +9,7 @@ urlpatterns = [
     path('api/slots/', views.slots),
     path('api/slots/<int:slot_id>/', views.slot_detail),
     path('api/slots/<int:slot_id>/command/', views.command),
+    path('api/slots/<int:slot_id>/password-breaker/', views.password_breaker),
     path('api/slots/<int:slot_id>/applications/', views.applications),
     path('api/slots/<int:slot_id>/loadout/', views.loadout),
     path('api/slots/<int:slot_id>/route/', views.route),

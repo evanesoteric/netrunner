@@ -1,9 +1,17 @@
 # Gameplay reference
 
+## Graphical password breaker
+
+Connect to a server from the local terminal to see its secure login. Scan its authentication service with Cartograph, then use **Open password breaker** or launch Lockpick through Applications. Click **Break password** to start the rolling character sequence. Lockpick is a graphical application on its own and in Workspace.
+
+The server controls completion time. CPU speed, Lockpick speed, target security, and route latency affect duration. Starting an attempt charges the tool's compute fee once. Insufficient capability produces a failed attempt after the sequence; no filesystem access or trace is granted on failure. Cancel, disconnect, close Lockpick, or change Lockpick versions to stop an attempt; compute charges are not refunded. Hiding a Workspace panel keeps its process and attempt running.
+
+Successful completion automatically logs in, mounts the filesystem, records remote access, and starts the trace. Cracking time does not subtract from the new trace budget. Attempts survive page changes and reloads while the process runs. Completion and the subsequent trace continue by server time while away, so returning late can reveal an expired trace. Wraith backdoor links still bypass authentication and tracing.
+
 ## Operator desktop
 
 - **Persistent terminal focus:** Enter and button submissions keep the command input focused, including failed requests. Up/Down recalls command history. Output can still be selected, and Tab can leave the terminal.
-- **Independent launchers:** the top bar launches the local terminal; the sidebar opens Atlas, the broker, and Cipher bank; the application launcher also starts the exchange and each installed tool. Running processes have their own consoles and share your machine's RAM. Closing a window does not disconnect a remote session.
+- **Independent launchers:** the top bar launches the local terminal; the sidebar opens Atlas, the broker, and Cipher bank; the application launcher also starts the exchange and each installed tool. Running processes use graphical interfaces or their own consoles and share your machine's RAM. Closing a window does not disconnect a remote session.
 - **Custom machines:** 40 named hardware products across five tiers: two processors, gateways, memory modules, and drives per tier. Hardware purchases enter inventory and must be fitted. Spare components can be sold at half price.
 - **Specialized software:** 50 individual licenses: Cartograph network mappers, Lockpick authentication crackers, Rosetta decryptors, Ashfall log cleaners, and Tripwire trace monitors. Each has five capability classes and Pro/Micro variants. Micro trades speed for lower memory use. Purchased tools must be launched separately.
 - **World routing:** Atlas contains named fictional servers at 12 map locations. Select an ordered proxy chain, reorder/remove hops, and commit it. The route is drawn from your home gateway through the proxies to the reserved target. Pan and zoom the map or use the accessible saved-server list. Routes remain committed across sessions.
@@ -24,13 +32,13 @@ Each console has its own `help` manual. Commands run entirely inside the game's 
 | --- | --- |
 | Local terminal | `apps`, `contracts`, `accept <id>`, `brief`, `route`, `connect <host>`, `status`, `ls`, `get <file>`, `rm <file>`, `disconnect`, `submit`, `abort`, `clear` |
 | Cartograph | `scan <host>` discovers authentication ports and archive metadata |
-| Lockpick | `crack <port>` works against a discovered service with sufficient tool capability |
+| Lockpick | Graphical password breaker: scan a server, connect to its login, then click **Break password** |
 | Rosetta | `decrypt <file>` operates on an accessible encrypted archive |
 | Ashfall | `erase` removes remote access logs; later remote operations leave new logs |
 | Tripwire | `trace` reads the live trace; keep a capable monitor running for the desktop countdown |
 | Cipher bank | `balance`, `history` display this save's independent account |
 
-The trace begins when the player connects, not when reserving a contract. Wall-clock time and simulated computation both consume it. CPU speed and tool speed affect computation time. Gateway stealth and proxy delays extend trace time; gateway bandwidth affects transfers. Hop order changes geographical latency. Connections and equipment changes lock the route while online. Copying a file does not automatically complete a contract: the broker verifies objective evidence and a clean exit before paying a manual submission. Higher security can defeat underpowered tools, encrypted files require a decryptor, and local disk space must fit the recovered archive.
+The trace begins at successful authentication, after Lockpick finishes breaking the password. A connected server login has no active trace. Wall-clock time and simulated computation both consume it. CPU speed and tool speed affect computation time. Gateway stealth and proxy delays extend trace time; gateway bandwidth affects transfers. Hop order changes geographical latency. Connections and equipment changes lock the route while online. Copying a file does not automatically complete a contract: the broker verifies objective evidence and a clean exit before paying a manual submission. Higher security can defeat underpowered tools, encrypted files require a decryptor, and local disk space must fit the recovered archive.
 
 Every mutation checks authentication, CSRF, save ownership, and current game state. PostgreSQL row locks protect financial updates and mission completion from concurrent/replayed requests. The test suite exercises both concurrent payment and purchase requests.
 

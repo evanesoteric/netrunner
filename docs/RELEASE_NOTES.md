@@ -2,6 +2,10 @@
 
 Historical feature and migration notes. See the [README](../README.md) for the current project overview and [development guide](DEVELOPMENT.md) for setup and maintenance.
 
+## v0.9 — graphical password breaker
+
+Lockpick now opens as a graphical application with a rolling character decoder, timed progress, and cancellation. Connected servers present a login before filesystem access. The trace begins on successful authentication; the server controls attempt timing, charges, capability checks, and completion across reloads. Both standalone and Workspace views share the same process. See the [gameplay reference](GAMEPLAY.md#graphical-password-breaker).
+
 ## v0.8 — personal multi-tool Workspace
 
 The sidebar now includes a separate **Workspace**. All previous screens and launchers remain available. Start with four panels—local terminal, Atlas, Cartograph, and Lockpick—then use **Launch visible tools** to start the available applications without leaving the page. Every console has its own command field, history, output, and cursor focus. A command updates the same runner state across all panels.

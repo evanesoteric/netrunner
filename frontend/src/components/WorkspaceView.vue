@@ -2,6 +2,8 @@
 import { computed, ref, nextTick, onMounted, onActivated, onDeactivated, onBeforeUnmount } from 'vue'
 import { GripVertical, Maximize2, X, Square, Play } from 'lucide-vue-next'
 import TerminalConsole from './TerminalConsole.vue'
+import PasswordBreaker from './PasswordBreaker.vue'
+import ServerLogin from './ServerLogin.vue'
 import NetworkMap from './NetworkMap.vue'
 import BrokerView from './BrokerView.vue'
 import ExchangeView from './ExchangeView.vue'
@@ -9,8 +11,8 @@ import FieldNotes from './FieldNotes.vue'
 import ServerHistory from './ServerHistory.vue'
 import BlackMarket from './BlackMarket.vue'
 import BackdoorsView from './BackdoorsView.vue'
-const props = defineProps({ slot: Object, username: String, busy: Boolean, api: Function, send: Function, launch: Function, close: Function, now: Number, offset: Number, ranks: Array })
-const emit = defineEmits(['route', 'directory', 'trade', 'contract', 'jump'])
+const props = defineProps({ slot: Object, username: String, busy: Boolean, api: Function, send: Function, launch: Function, close: Function, now: Number, offset: Number, ranks: Array, breakerAction: Function })
+const emit = defineEmits(['route', 'directory', 'trade', 'contract', 'jump', 'open-cracker'])
 const canvas = ref(null), panels = ref([]), starter = ref([]), revision = ref(0), identity = ref(''), saved = ref('[]')
 const ready = ref(false), loading = ref(true), saving = ref(false), error = ref(''), conflict = ref(null), narrow = ref(false), drag = ref(null)
 const selected = ref('cleaner-1-standard'), tileErrors = ref({}), launching = ref(false), recovery = ref(true)
@@ -208,7 +210,11 @@ defineExpose({ showApp })
     <section v-for="panel in panels" :key="panel.id" class="workspace-window panel" :data-workspace-window="panel.id" :style="narrow ? {} : { gridColumn: `${panel.x + 1} / span ${panel.w}`, gridRow: `${panel.y + 1} / span ${panel.h}` }" :aria-label="`${title(panel)} panel`">
       <header class="workspace-window-header"><button class="workspace-grip" :aria-label="`Move ${title(panel)}`" :disabled="narrow || loading" @pointerdown="begin($event, panel, 'move')" @pointermove="move" @pointerup="finish()" @pointercancel="finish(true)" @keydown="keyMove($event, panel, 'move')"><GripVertical :size="15" /></button><strong>{{ title(panel) }}</strong><span v-if="process(panel)" class="workspace-process-ram">{{ process(panel).ram }} GB</span><button v-if="process(panel)" class="workspace-control" :aria-label="`Stop ${title(panel)}`" :disabled="busy" @click="close(panel.id, slot.id)"><Square :size="12" /></button><button class="workspace-control" :aria-label="`Remove ${title(panel)} panel`" @click="removePanel(panel.id)"><X :size="14" /></button></header>
       <div class="workspace-window-body" :class="{ 'workspace-console-body': process(panel)?.console, 'workspace-atlas-body': panel.id === 'atlas' && process(panel) }">
-        <TerminalConsole v-if="process(panel)?.console" :slot="slot" :application="panel.id" :busy="busy" :send="send" embedded :autofocus="false" />
+        <PasswordBreaker v-if="panel.id === 'cracker' && process(panel)" :slot="slot" :busy="busy" :action="breakerAction" />
+        <template v-else-if="process(panel)?.console">
+        <ServerLogin v-if="panel.id === 'terminal'" :slot="slot" :busy="busy" @open-cracker="emit('open-cracker')" />
+        <TerminalConsole :slot="slot" :application="panel.id" :busy="busy" :send="send" embedded :autofocus="false" />
+        </template>
         <NetworkMap v-else-if="panel.id === 'atlas' && process(panel)" map-only :slot="slot" :busy="busy" @save="emit('route', $event)" @directory="(action, id) => emit('directory', action, id)" />
         <BrokerView v-else-if="panel.id === 'broker' && process(panel)" :slot="slot" :busy="busy" :now="now" :offset="offset" :ranks="ranks" @action="(action, job) => emit('contract', action, job)" />
         <ExchangeView v-else-if="panel.id === 'market' && process(panel)" :slot="slot" :busy="busy" @trade="(action, id) => emit('trade', action, id)" />

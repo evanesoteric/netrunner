@@ -44,7 +44,10 @@ def available_at(slot, contract_id):
 def trace_remaining(slot):
     if not slot.mission_started or slot.remote_host.get('_backdoor'):
         return None
-    elapsed = (timezone.now() - slot.mission_started).total_seconds()
+    started = slot.mission_state.get('trace_started', slot.mission_started.isoformat())
+    if not started:
+        return None
+    elapsed = (timezone.now() - parse_datetime(started)).total_seconds()
     return max(0, math.ceil(slot.mission_state.get('trace_budget', 0) - slot.mission_state.get('work', 0) - elapsed))
 
 
@@ -83,6 +86,8 @@ def fail(slot, reason):
 def settle(slot):
     from .operations import settle_ransomware
     settle_ransomware(slot)
+    from .passwords import settle_break
+    settle_break(slot)
     if slot.mission_started and trace_remaining(slot) == 0:
         fail(slot, 'TRACE COMPLETE. Your gateway was identified.')
         slot.save()
@@ -133,6 +138,9 @@ def launch(slot, product_id):
     if ram_used(slot) > hardware(slot)['memory']['ram']:
         slot.running_apps = previous
         raise GameError('Not enough free RAM. Close an application or fit more memory.')
+    if app == 'cracker' and previous.get(app) != product_id:
+        from .passwords import cancel_break
+        cancel_break(slot)
     return app
 
 
@@ -177,7 +185,7 @@ def trade(slot, action, product_id):
 MANUALS = {
     'terminal': 'LOCAL SHELL\nhelp — application manual\nrumors — intercepted hidden-service invitation\njump <host> — use an installed Wraith backdoor\napps — running processes and RAM\ncontracts — broker listings\naccept <contract-id> — reserve by the numeric ID in contracts (0–255)\nbrief — read the accepted brief\nroute — inspect the committed proxy chain\nconnect <host> — dial a fictional target\nstatus — gateway status\nhistory — recent operator journal for this target\nls — remote file listing\nget <file> — copy a readable file to local storage\nrm <file> — remove a remote file\ndisconnect — end the remote session\nsubmit — deliver evidence to the broker\nabort — abandon the contract (fine and reputation loss)\nclear — clear local console output',
     'mapper': 'CARTOGRAPH\nscan <host> — inspect a fictional host and its services\nCosts 1 + tool tier CPH. Scan quality depends on tool capability.',
-    'cracker': 'LOCKPICK\ncrack <port> — attack a discovered authentication service\nRequires an active remote connection. Underpowered tools can fail.',
+    'cracker': 'LOCKPICK\nOpen the graphical password breaker from Applications. Connect to a server login and scan its authentication service first.',
     'decryptor': 'ROSETTA\ndecrypt <file> — decode an encrypted remote archive\nRequires file access and a sufficient decryption engine.',
     'cleaner': 'ASHFALL\nerase — remove remote access logs\nLater remote operations can leave new log entries.',
     'monitor': 'TRIPWIRE\ntrace — inspect the active trace\nThe monitor must remain running to show a live countdown.',
@@ -214,7 +222,7 @@ def _tool_work(slot, app, base):
     if slot.balance < cost:
         return False, 'Insufficient CPH for tool compute time. No operation was performed.'
     transact(slot, -cost, f'Compute // {tool["name"]}')
-    if slot.mission_started:
+    if slot.mission_started and slot.mission_state.get('access'):
         slot.mission_state['work'] = slot.mission_state.get('work', 0) + math.ceil(base / (hardware(slot)['cpu']['speed'] * tool['speed']) * 2 + slot.mission_state.get('latency', 0) / 12)
     return True, tool
 
@@ -250,6 +258,12 @@ def execute(slot, app, raw):
                 result = 'Unknown bank command. Read help for the bank manual.'
         elif app == 'terminal':
             result = _shell(slot, verb, args, job)
+        elif app == 'cracker':
+            if verb != 'crack' or len(args) != 1:
+                raise GameError('Open the graphical Lockpick password breaker.')
+            from .passwords import start_break
+            start_break(slot, args[0])
+            return
         elif app == 'rootkit':
             from .operations import install_rootkit
             if verb != 'install' or args:
@@ -266,12 +280,13 @@ def execute(slot, app, raw):
             if verb != expected or len(args) != count:
                 raise GameError('Unknown command or arguments for this application. Read help for its manual.')
             if app == 'monitor':
-                if slot.mission_started and SOFTWARE[slot.running_apps[app]]['power'] < job['security']:
+                if trace_remaining(slot) is not None and SOFTWARE[slot.running_apps[app]]['power'] < job['security']:
                     result = 'Trace encrypted: this monitor cannot decode the target security class.'
                 elif slot.remote_host.get('_backdoor'):
                     result = 'Wraith link: remote logging suppressed. No active trace.'
                 else:
-                    result = f'Trace remaining: {trace_remaining(slot)} seconds.' if slot.mission_started else 'No active remote trace.'
+                    remaining = trace_remaining(slot)
+                    result = f'Trace remaining: {remaining} seconds.' if remaining is not None else 'No active remote trace.'
             else:
                 if app == 'mapper' and not slot.mission_started:
                     from .operations import find_target
@@ -285,7 +300,7 @@ def execute(slot, app, raw):
                 charged, tool = _tool_work(slot, app, {'mapper': 8, 'cracker': 22, 'decryptor': 18, 'cleaner': 14}[app])
                 if not charged:
                     raise GameError(tool)
-                if slot.mission_started:
+                if slot.mission_started and state.get('access'):
                     state['dirty'] = True
                 if tool['power'] < job['security']:
                     raise GameError(f'Tool capability {tool["power"]} is insufficient for security class {job["security"]}. Operation failed.')
@@ -297,17 +312,9 @@ def execute(slot, app, raw):
                     state['scanned_revision'] = server.revision
                     state['scanned'] = True
                     state['scanned_host'] = job['target']
-                    if slot.mission_started:
+                    if slot.mission_started and state.get('access'):
                         state['dirty'] = True
                     result = f'Host: {job["target"]}\n{job["port"]}/tcp  OPEN  auth-v{job["security"]} / patch r{job.get("server_revision", 1)}\nArchive: {job["file"] if job.get("file_present", True) else "missing"} / {job["size"]} MB / {"encrypted" if job["encrypted"] else "plaintext"}\nOther ports: filtered. Scan complete.'
-                elif app == 'cracker':
-                    if not state.get('scanned') or state.get('scanned_revision', 1) != job.get('server_revision', 1):
-                        raise GameError('No service fingerprint available.')
-                    if args[0] != str(job['port']):
-                        raise GameError('Connection refused on this port.')
-                    state.update(access=True, dirty=True)
-                    record_action(slot, job, 'access_granted', 'Authentication compromised; filesystem mounted.')
-                    result = 'Authentication compromised. Remote filesystem mounted.'
                 elif app == 'decryptor':
                     if not state.get('access') or args[0] != job['file'] or not job.get('file_present', True):
                         raise GameError('Archive unavailable or access denied.')
@@ -394,7 +401,9 @@ def _shell(slot, verb, args, job):
             return 'Remote link closed.'
         record_action(slot, job, 'disconnected', 'Remote session closed with no new access signature.')
         slot.mission_started = None
-        state.update(clean_exit=True, access=False)
+        from .passwords import cancel_break
+        cancel_break(slot)
+        state.update(clean_exit=True, access=False, trace_started=None)
         slot.remote_host = {}
         return 'Remote link closed. No access signature found.'
     if verb in ('ls', 'get', 'rm'):

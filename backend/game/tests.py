@@ -30,7 +30,14 @@ class APIHelpers:
     def cmd(self, command, app='terminal'):
         if command.startswith('accept ') and command[7:] in CONTRACT_BY_ID:
             command = 'accept ' + public_code(command[7:])
-        return self.post(self.endpoint('command'), {'application': app, 'command': command})
+        response = self.post(self.endpoint('command'), {'application': app, 'command': command})
+        # Existing gameplay scenarios wait for Lockpick; timing is exercised separately.
+        if app == 'cracker' and response.get('password_break'):
+            slot = SaveSlot.objects.get(pk=self.slot.pk)
+            slot.mission_state['password_break']['finishes_at'] = timezone.now().isoformat()
+            slot.save()
+            return self.refresh()
+        return response
 
     def log_text(self, response):
         return '\n'.join(line['text'] for line in response['mission_log'])
@@ -344,6 +351,9 @@ class SimulationTests(APIHelpers, TestCase):
         self.assertEqual(result['balance'], 1110)
         self.reserve('0-1')
         self.cmd('connect helix-1.internal')
+        self.slot.refresh_from_db()
+        self.slot.mission_state['trace_started'] = (timezone.now() - timedelta(seconds=500)).isoformat()
+        self.slot.save()
         SaveSlot.objects.filter(pk=self.slot.pk).update(mission_started=timezone.now() - timedelta(seconds=500))
         first = self.refresh()
         self.assertIsNone(first['active_contract'])
@@ -372,7 +382,7 @@ class SimulationTests(APIHelpers, TestCase):
 
     def test_trace_monitor_exposes_time_only_while_running(self):
         self.post(self.endpoint('loadout'), {'action': 'buy', 'product_id': 'monitor-1-standard'})
-        self.scan_and_connect()
+        self.gain_access()
         self.assertIsNone(self.refresh()['trace_remaining'])
         result = self.launch('monitor-1-standard')
         self.assertGreater(result['trace_remaining'], 0)
@@ -544,6 +554,21 @@ class ConcurrentEconomyTests(APIHelpers, TransactionTestCase):
         self.assertEqual(self.slot.balance, 2000)
         self.assertEqual(self.slot.ransomware_ops, [])
         self.assertEqual(self.slot.ledger.filter(description__startswith='Ransomware payout').count(), 1)
+
+    def test_concurrent_password_starts_charge_once_and_completion_records_once(self):
+        self.scan_and_connect()
+        self.launch('cracker-1-standard')
+        self.slot.refresh_from_db()
+        balance = self.slot.balance
+        self.assertCountEqual(self.parallel_post('password-breaker', {'action': 'start'}), [200, 400])
+        self.slot.refresh_from_db()
+        self.assertEqual(self.slot.balance, balance - 2)
+        self.slot.mission_state['password_break']['finishes_at'] = timezone.now().isoformat()
+        self.slot.save()
+        self.assertEqual(self.parallel_post('command', {'application': 'terminal', 'command': 'status'}), [200, 200])
+        self.slot.refresh_from_db()
+        self.assertTrue(self.slot.mission_state['access'])
+        self.assertEqual(self.slot.server_states.get(address='helix-0.internal').events.filter(kind='access_granted').count(), 1)
 
     def test_concurrent_note_edits_cannot_silently_overwrite_each_other(self):
         identity = self.slot.created_at.isoformat()
@@ -1251,3 +1276,149 @@ class WorkspaceTests(APIHelpers, TestCase):
         self.assertEqual(self.workspace()['layout'], initial['layout'])
         self.client.logout()
         self.assertEqual(self.client.get(f'/api/{self.endpoint("workspace")}/').status_code, 401)
+
+
+class PasswordBreakerTests(APIHelpers, TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user('decoder', password='test-passphrase-long')
+        self.client.force_login(self.user)
+        self.slot = SaveSlot.objects.create(user=self.user, position=1, alias='decoder')
+        self.scan_and_connect()
+        self.launch('cracker-1-standard')
+
+    def start(self, **extra):
+        return self.post(self.endpoint('password-breaker'), {'action': 'start', **extra})
+
+    def finish_at(self, delta=0):
+        from unittest.mock import patch
+        from django.utils.dateparse import parse_datetime
+        attempt = self.refresh()['password_break']
+        with patch('django.utils.timezone.now', return_value=parse_datetime(attempt['finishes_at']) + timedelta(seconds=delta)):
+            return self.refresh()
+
+    def test_login_has_no_trace_even_after_long_wait_or_scanning(self):
+        self.slot.refresh_from_db()
+        self.slot.mission_started = timezone.now() - timedelta(days=1)
+        self.slot.save()
+        self.cmd('scan helix-0.internal', 'mapper')
+        result = self.refresh()
+        self.assertTrue(result['connected'])
+        self.assertFalse(result['authenticated'])
+        self.assertFalse(result['trace_active'])
+        self.assertFalse(self.slot.server_states.get(address='helix-0.internal').remote_logs)
+        self.assertIn('Permission denied', self.log_text(self.cmd('get research.dat')))
+
+    def test_monitor_reports_no_active_trace_at_server_login(self):
+        self.post(self.endpoint('applications'), {'action': 'close', 'application': 'mapper'})
+        self.slot.refresh_from_db()
+        self.slot.installed_software.append('monitor-1-standard')
+        self.slot.save()
+        self.launch('monitor-1-standard')
+        result = self.cmd('trace', 'monitor')
+        self.assertIsNone(result['trace_remaining'])
+        self.assertIn('No active remote trace.', result['mission_log'][-1]['text'])
+
+    def test_duration_is_authoritative_and_completion_starts_trace_once(self):
+        result = self.start(finishes_at='2000-01-01T00:00:00Z', duration=0, access=True)
+        self.assertFalse(result['authenticated'])
+        self.assertFalse(result['trace_active'])
+        self.assertGreaterEqual(result['password_break']['duration'], 4)
+        self.assertFalse(self.refresh()['authenticated'])
+        self.assertFalse(next(app for app in result['running_apps'] if app['id'] == 'cracker')['console'])
+        result = self.finish_at(7)
+        self.assertTrue(result['authenticated'])
+        self.assertTrue(result['trace_active'])
+        self.assertIsNone(result['password_break'])
+        self.slot.refresh_from_db()
+        self.assertEqual(self.slot.mission_state['work'], 0)
+        from django.utils.dateparse import parse_datetime
+        from game.mechanics import trace_remaining
+        from unittest.mock import patch
+        with patch('django.utils.timezone.now', return_value=parse_datetime(self.slot.mission_state['trace_started']) + timedelta(seconds=7)):
+            self.assertEqual(trace_remaining(self.slot), self.slot.mission_state['trace_budget'] - 7)
+        self.assertTrue(self.slot.server_states.get(address='helix-0.internal').remote_logs)
+        self.assertEqual(self.slot.server_states.get(address='helix-0.internal').events.filter(kind='access_granted').count(), 1)
+        self.refresh()
+        self.assertEqual(self.slot.server_states.get(address='helix-0.internal').events.filter(kind='access_granted').count(), 1)
+
+    def test_delayed_poll_uses_actual_completion_time_and_can_expire_trace(self):
+        self.start()
+        result = self.finish_at(500)
+        self.assertFalse(result['connected'])
+        self.assertIsNone(result['active_contract'])
+        self.assertIn('TRACE COMPLETE', self.log_text(result))
+
+    def test_duplicate_start_does_not_charge_twice_or_restart(self):
+        first = self.start()
+        self.post(self.endpoint('password-breaker'), {'action': 'start'}, 400)
+        second = self.refresh()
+        self.assertEqual(first['password_break'], second['password_break'])
+        self.assertEqual(first['balance'], second['balance'])
+
+    def test_cancellation_keeps_charge_and_prevents_access(self):
+        start = self.start()
+        result = self.post(self.endpoint('password-breaker'), {'action': 'cancel'})
+        self.assertEqual(start['balance'], result['balance'])
+        self.assertFalse(result['authenticated'])
+        self.assertIsNone(result['password_break'])
+        self.assertEqual(result['password_result'], 'cancelled')
+        self.assertFalse(result['trace_active'])
+
+    def test_stop_cancels_and_reopening_does_not_resume(self):
+        self.start()
+        result = self.post(self.endpoint('applications'), {'action': 'close', 'application': 'cracker'})
+        self.assertIsNone(result['password_break'])
+        result = self.launch('cracker-1-standard')
+        self.assertFalse(result['authenticated'])
+        self.assertIsNone(result['password_break'])
+
+    def test_disconnecting_cancels_pending_attempt_without_contract_failure(self):
+        self.start()
+        result = self.cmd('disconnect')
+        self.assertFalse(result['connected'])
+        self.assertIsNotNone(result['active_contract'])
+        self.assertIsNone(result['password_break'])
+        self.assertFalse(self.cmd('connect helix-0.internal')['authenticated'])
+
+    def test_insufficient_capability_fails_after_duration_without_trace(self):
+        self.slot.server_states.filter(address='helix-0.internal').update(security=2)
+        self.start()
+        result = self.finish_at()
+        self.assertEqual(result['password_result'], 'failed')
+        self.assertFalse(result['authenticated'])
+        self.assertFalse(result['trace_active'])
+        self.assertIn('insufficient', self.log_text(result))
+
+    def test_missing_scan_no_tool_or_insufficient_funds_reject_start(self):
+        self.slot.refresh_from_db()
+        self.slot.mission_state['scanned'] = False
+        self.slot.save()
+        self.post(self.endpoint('password-breaker'), {'action': 'start'}, 400)
+        self.cmd('scan helix-0.internal', 'mapper')
+        SaveSlot.objects.filter(pk=self.slot.pk).update(balance=0)
+        self.post(self.endpoint('password-breaker'), {'action': 'start'}, 400)
+        self.post(self.endpoint('applications'), {'action': 'close', 'application': 'cracker'})
+        self.post(self.endpoint('password-breaker'), {'action': 'start'}, 400)
+        self.assertIsNone(self.refresh()['password_break'])
+
+    def test_reload_retains_same_attempt_and_slot_ownership_is_enforced(self):
+        first = self.start()
+        self.assertEqual(first['password_break'], self.refresh()['password_break'])
+        stranger = get_user_model().objects.create_user('stranger', password='test-passphrase-long')
+        client = Client()
+        client.force_login(stranger)
+        self.post(self.endpoint('password-breaker'), {'action': 'cancel'}, 404, client=client)
+        self.assertEqual(first['password_break'], self.refresh()['password_break'])
+
+    def test_faster_cpu_shortens_attempt_and_software_switch_cancels_it(self):
+        slow = self.start()['password_break']['duration']
+        self.post(self.endpoint('password-breaker'), {'action': 'cancel'})
+        self.cmd('disconnect')
+        self.slot.refresh_from_db()
+        self.slot.equipment['cpu'] = 'cpu-2-standard'
+        self.slot.installed_software.append('cracker-1-compact')
+        self.slot.save()
+        self.cmd('connect helix-0.internal')
+        self.assertLess(self.start()['password_break']['duration'], slow)
+        result = self.launch('cracker-1-compact')
+        self.assertIsNone(result['password_break'])

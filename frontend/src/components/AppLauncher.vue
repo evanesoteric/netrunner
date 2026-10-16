@@ -9,7 +9,7 @@ const running = id => props.slot.running_apps.some(app => app.product_id === id)
 
 <template>
   <div class="eyebrow">DESKTOP / APPLICATION LAUNCHER</div>
-  <div class="page-heading"><div><h1>Tools of your trade<span>_</span></h1><p>Separate processes. Separate consoles. Your memory is the limit.</p></div><span class="badge">RAM {{ slot.ram_used }} / {{ slot.equipment.memory.ram }} GB</span></div>
+  <div class="page-heading"><div><h1>Tools of your trade<span>_</span></h1><p>Independent tools and consoles. Your memory is the limit.</p></div><span class="badge">RAM {{ slot.ram_used }} / {{ slot.equipment.memory.ram }} GB</span></div>
   <div v-if="slot.running_apps.length" class="process-strip"><span class="micro">RUNNING</span><div v-for="app in slot.running_apps" :key="app.id"><button class="process-name" @click="$emit('launch', app.product_id)">{{ app.name }}</button><button :aria-label="`Close ${app.name}`" :disabled="busy" @click="$emit('close', app.id)"><X :size="13" /></button></div></div>
   <h2 class="section-heading">SYSTEM APPLICATIONS <span>BUILT IN</span></h2>
   <div class="launcher-grid"><article class="panel launcher-card" v-for="app in slot.builtins" :key="app.id"><component :is="icons[app.id]" :size="27" /><span class="micro">{{ app.ram ? `${app.ram} GB RAM` : 'SERVICE TERMINAL' }}</span><h2>{{ app.name }}</h2><p>{{ app.description }}</p><button class="button secondary wide" :disabled="busy" @click="$emit('launch', app.id)">{{ running(app.id) ? 'Open' : 'Launch' }} {{ app.name }}<Play :size="13" /></button></article></div>

@@ -34,7 +34,7 @@ for category, names in FAMILIES.items():
 SOFTWARE = {}
 TOOL_KINDS = {
     'mapper': ('Network mapper', 'Cartograph', 'scan <host>', 100, 2),
-    'cracker': ('Authentication cracker', 'Lockpick', 'crack <port>', 160, 3),
+    'cracker': ('Authentication cracker', 'Lockpick', 'Graphical password breaker', 160, 3),
     'decryptor': ('File decryptor', 'Rosetta', 'decrypt <file>', 180, 3),
     'cleaner': ('Log cleaner', 'Ashfall', 'erase', 110, 2),
     'monitor': ('Trace monitor', 'Tripwire', 'trace', 90, 2),

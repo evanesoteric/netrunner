@@ -8,8 +8,9 @@ from django.http import JsonResponse
 from django.utils import timezone
 from django.views.decorators.csrf import ensure_csrf_cookie
 from .contracts import codes, public_job
-from .world import all_contracts, get_contract, all_servers, session_target
+from .world import all_contracts, get_contract, all_servers
 from .models import SaveSlot, LedgerEntry
+from .persistence import current_target
 from .catalog import CURRENCY, RANKS, THRESHOLDS, PRODUCTS, BUILTIN_APPS, HOME_NODE
 from .mechanics import GameError, hardware, ram_used, route_stats, available_at, trace_remaining, settle, launch, trade, validate_route, execute, edit_directory, reserve, fail
 
@@ -46,7 +47,7 @@ def serialize(slot, detailed=False):
     servers = all_servers(slot)
     monitor = PRODUCTS.get(slot.running_apps.get('monitor', ''))
     job = get_contract(slot.active_contract)
-    target = session_target(slot)
+    target = current_target(slot)
     remaining = trace_remaining(slot) if monitor and target and monitor['power'] >= target['security'] else None
     data = {
         'id': slot.id, 'position': slot.position, 'alias': slot.alias, 'created_at': slot.created_at,
@@ -56,6 +57,11 @@ def serialize(slot, detailed=False):
         'rank_floor': THRESHOLDS[slot.rank], 'completed': slot.completed,
         'active_contract': public_job(job, mapping),
         'connected': bool(slot.mission_started),
+        'authenticated': bool(slot.mission_started and slot.mission_state.get('access')),
+        'trace_active': bool(slot.mission_started and trace_remaining(slot) is not None),
+        'password_break': slot.mission_state.get('password_break') if slot.mission_started else None,
+        'password_result': slot.mission_state.get('password_result') if slot.mission_started else None,
+        'login_service': {'port': target['port'], 'security': target['security']} if target and slot.mission_started and slot.mission_state.get('scanned') and slot.mission_state.get('scanned_host') == target['target'] and slot.mission_state.get('scanned_revision', 1) == target.get('server_revision', 1) else None,
         'remote_target': target['target'] if target and slot.mission_started else None,
         'stealth_session': bool(slot.remote_host.get('_backdoor')),
         'remote_node': {key: target[key] for key in ('target', 'x', 'y')} if target and slot.mission_started else None,
@@ -81,7 +87,7 @@ def serialize(slot, detailed=False):
                 'id': key, 'product_id': value,
                 'name': BUILTIN_APPS[value]['name'] if value in BUILTIN_APPS else PRODUCTS[value]['name'],
                 'ram': BUILTIN_APPS[value]['ram'] if value in BUILTIN_APPS else PRODUCTS[value]['ram'],
-                'console': BUILTIN_APPS[value]['console'] if value in BUILTIN_APPS else True,
+                'console': BUILTIN_APPS[value]['console'] if value in BUILTIN_APPS else key != 'cracker',
             } for key, value in slot.running_apps.items()],
             'ram_used': ram_used(slot),
             'catalog': [item for item in PRODUCTS.values() if not item.get('black_market') or item['id'] in slot.installed_software],
@@ -97,7 +103,7 @@ def serialize(slot, detailed=False):
 @ensure_csrf_cookie
 @api(['GET'], authenticated=False)
 def session(request):
-    return JsonResponse({'user': {'username': request.user.username} if request.user.is_authenticated else None, 'currency': CURRENCY, 'ranks': RANKS, 'version': '0.8.1', 'server_time': timezone.now().isoformat()})
+    return JsonResponse({'user': {'username': request.user.username} if request.user.is_authenticated else None, 'currency': CURRENCY, 'ranks': RANKS, 'version': '0.9.0', 'server_time': timezone.now().isoformat()})
 
 @api(['POST'], authenticated=False)
 def register(request):
@@ -177,6 +183,23 @@ def command(request, slot_id):
 
 @api(['POST'])
 @transaction.atomic
+def password_breaker(request, slot_id):
+    from .passwords import start_break, cancel_break
+    slot = SaveSlot.objects.select_for_update().get(pk=slot_id, user=request.user)
+    settle(slot)
+    action = request.data.get('action')
+    if action == 'start':
+        start_break(slot)
+    elif action == 'cancel':
+        cancel_break(slot)
+    else:
+        raise GameError('Choose start or cancel.')
+    slot.save()
+    return JsonResponse(serialize(slot, True))
+
+
+@api(['POST'])
+@transaction.atomic
 def applications(request, slot_id):
     slot = SaveSlot.objects.select_for_update().get(pk=slot_id, user=request.user)
     settle(slot)
@@ -187,6 +210,9 @@ def applications(request, slot_id):
         app = text_field(request.data, 'application', 24)
         if app not in slot.running_apps:
             raise GameError('Application is not running.')
+        if app == 'cracker':
+            from .passwords import cancel_break
+            cancel_break(slot)
         slot.running_apps = {key: value for key, value in slot.running_apps.items() if key != app}
     else:
         raise GameError('Choose launch or close.')

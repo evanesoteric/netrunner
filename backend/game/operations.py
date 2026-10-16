@@ -69,8 +69,10 @@ def connect_target(slot, address, backdoor=False):
         slot.mission_state = {'scanned_revision': scanned_revision}
         state = slot.mission_state
     state.update(trace_budget=100 - target['security'] * 10 + stats['delay'] + hardware(slot)['gateway']['stealth'] * 8,
-                 work=0, latency=stats['latency'], access=False, dirty=False, clean_exit=False, scanned=bool(scanned) and state.get('scanned_revision', 1) == server.revision, logs_recorded=False)
-    return f'Dialing {address} via {stats["hops"]} proxies.\nLease paid: {stats["fee"]} CPH. Remote session established.'
+                 work=0, trace_started=None, scanned_host=address, latency=stats['latency'], access=False, dirty=False, clean_exit=False, scanned=bool(scanned) and state.get('scanned_revision', 1) == server.revision, logs_recorded=False)
+    state.pop('password_break', None)
+    state.pop('password_result', None)
+    return f'Dialing {address} via {stats["hops"]} proxies.\nLease paid: {stats["fee"]} CPH. Remote session established. Server login awaiting authentication.'
 
 
 def install_rootkit(slot):

@@ -2,25 +2,25 @@
 
 Committed features and follow-up work. Speculative features belong in [IDEAS.md](IDEAS.md).
 
-## Next: Field Notes sidebar panel
+## Completed in v0.7: Field Notes sidebar panel
 
-- [ ] Add a Field Notes / Notepad editor accessible from the sidebar.
-- [ ] Save notes in PostgreSQL separately for each of the three save slots.
-- [ ] Support freeform notes for server addresses, routes, clues, aliases, and investigations.
-- [ ] Show saving, saved, and failed-save states; protect unsaved text when changing panels or saves.
-- [ ] Verify ownership checks, persistence after sign-out, backup/restore, and behavior when restarting a save.
+- [x] Add a Field Notes / Notepad editor accessible from the sidebar.
+- [x] Save notes in PostgreSQL separately for each of the three save slots.
+- [x] Support freeform notes for server addresses, routes, clues, aliases, and investigations.
+- [x] Show saving, saved, and failed-save states; protect unsaved text when changing panels or saves.
+- [x] Verify ownership checks, persistence after sign-out, backup/restore, and behavior when restarting a save.
 
 Start with a simple text editor. Links, tags, multiple documents, and an evidence board can be considered later.
 
-## Must-have: Persistent servers with histories
+## Completed in v0.7: Persistent servers with histories
 
-- [ ] Give servers durable state instead of recreating a fresh filesystem and security posture for each visit.
-- [ ] Record relevant events: visits, file retrieval/deletion, access-log cleanup, installed backdoors, ransomware activity, administrator responses, and patches.
-- [ ] Let subsequent visits reflect earlier actions: moved or missing files, changed services, patched weaknesses, and administrator notices.
-- [ ] Integrate contract targets, ordinary directory servers, generated content, and saved backdoor links with persistent server identities.
-- [ ] Decide the scope of server state. Prefer a separate world state per save initially, consistent with three independent lives; shared multiplayer consequences need a deliberate later design.
-- [ ] Define server-time recovery and maintenance rules, including offline progress, without unexpectedly changing a live session underneath the player.
-- [ ] Persist state and history through sign-out, container restarts, and PostgreSQL dump/restore; define migration and save-restart behavior.
+- [x] Give servers durable state instead of recreating a fresh filesystem and security posture for each visit.
+- [x] Record relevant events: visits, file retrieval/deletion, access-log cleanup, installed backdoors, ransomware activity, administrator responses, and patches.
+- [x] Let subsequent visits reflect earlier actions: moved or missing files, changed services, patched weaknesses, and administrator notices.
+- [x] Integrate contract targets, ordinary directory servers, generated content, and saved backdoor links with persistent server identities.
+- [x] Decide the scope of server state. Prefer a separate world state per save initially, consistent with three independent lives; shared multiplayer consequences need a deliberate later design.
+- [x] Define server-time recovery and maintenance rules, including offline progress, without unexpectedly changing a live session underneath the player.
+- [x] Persist state and history through sign-out, container restarts, and PostgreSQL dump/restore; define migration and save-restart behavior.
 
 Design goal: revisiting a familiar server should reveal the consequences of previous activity and tell an ongoing story. Give players observable clues and opportunities to respond to security changes.
 

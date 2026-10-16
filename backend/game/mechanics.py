@@ -11,6 +11,9 @@ from .catalog import (
 from .models import LedgerEntry
 from .contracts import codes, public_code
 from .world import all_contracts, get_contract, get_server, session_target
+from .persistence import (current_target, effective_target, ensure_server, event, observe,
+                          settle_world, record_action, record_failure, record_contract,
+                          sync_remote_logs, clear_remote_logs)
 
 
 class GameError(Exception):
@@ -60,6 +63,7 @@ def fail(slot, reason):
     job = session_target(slot)
     if not job:
         return
+    record_failure(slot, job, reason)
     contract_failure = bool(slot.active_contract)
     fine = min(slot.balance, 90 + job['rank'] * 80)
     if fine:
@@ -82,6 +86,7 @@ def settle(slot):
     if slot.mission_started and trace_remaining(slot) == 0:
         fail(slot, 'TRACE COMPLETE. Your gateway was identified.')
         slot.save()
+    settle_world(slot)
 
 
 def validate_route(slot, route):
@@ -170,7 +175,7 @@ def trade(slot, action, product_id):
 
 
 MANUALS = {
-    'terminal': 'LOCAL SHELL\nhelp — application manual\nrumors — intercepted hidden-service invitation\njump <host> — use an installed Wraith backdoor\napps — running processes and RAM\ncontracts — broker listings\naccept <contract-id> — reserve by the numeric ID in contracts (0–255)\nbrief — read the accepted brief\nroute — inspect the committed proxy chain\nconnect <host> — dial a fictional target\nstatus — gateway status\nls — remote file listing\nget <file> — copy a readable file to local storage\nrm <file> — remove a remote file\ndisconnect — end the remote session\nsubmit — deliver evidence to the broker\nabort — abandon the contract (fine and reputation loss)\nclear — clear local console output',
+    'terminal': 'LOCAL SHELL\nhelp — application manual\nrumors — intercepted hidden-service invitation\njump <host> — use an installed Wraith backdoor\napps — running processes and RAM\ncontracts — broker listings\naccept <contract-id> — reserve by the numeric ID in contracts (0–255)\nbrief — read the accepted brief\nroute — inspect the committed proxy chain\nconnect <host> — dial a fictional target\nstatus — gateway status\nhistory — recent operator journal for this target\nls — remote file listing\nget <file> — copy a readable file to local storage\nrm <file> — remove a remote file\ndisconnect — end the remote session\nsubmit — deliver evidence to the broker\nabort — abandon the contract (fine and reputation loss)\nclear — clear local console output',
     'mapper': 'CARTOGRAPH\nscan <host> — inspect a fictional host and its services\nCosts 1 + tool tier CPH. Scan quality depends on tool capability.',
     'cracker': 'LOCKPICK\ncrack <port> — attack a discovered authentication service\nRequires an active remote connection. Underpowered tools can fail.',
     'decryptor': 'ROSETTA\ndecrypt <file> — decode an encrypted remote archive\nRequires file access and a sufficient decryption engine.',
@@ -232,7 +237,7 @@ def execute(slot, app, raw):
     if verb == 'help' and not args:
         log(slot, app, MANUALS[app])
         return
-    job = session_target(slot)
+    job = current_target(slot)
     state = slot.mission_state
     result = ''
     try:
@@ -270,7 +275,7 @@ def execute(slot, app, raw):
             else:
                 if app == 'mapper' and not slot.mission_started:
                     from .operations import find_target
-                    job = find_target(slot, args[0])
+                    job = effective_target(slot, find_target(slot, args[0]))
                 if not job:
                     raise GameError('No target. Scan a directory server or reserve an assignment.')
                 if app != 'mapper' and not slot.mission_started:
@@ -285,29 +290,37 @@ def execute(slot, app, raw):
                 if tool['power'] < job['security']:
                     raise GameError(f'Tool capability {tool["power"]} is insufficient for security class {job["security"]}. Operation failed.')
                 if app == 'mapper':
+                    server = ensure_server(slot, job)
+                    observe(server)
+                    event(server, 'scanned', f'Service fingerprint observed: port {job["port"]}, revision {server.revision}.')
+                    server.save()
+                    state['scanned_revision'] = server.revision
                     state['scanned'] = True
                     state['scanned_host'] = job['target']
                     if slot.mission_started:
                         state['dirty'] = True
-                    result = f'Host: {job["target"]}\n{job["port"]}/tcp  OPEN  auth-v{job["security"]}\nArchive: {job["file"]} / {job["size"]} MB / {"encrypted" if job["encrypted"] else "plaintext"}\nOther ports: filtered. Scan complete.'
+                    result = f'Host: {job["target"]}\n{job["port"]}/tcp  OPEN  auth-v{job["security"]} / patch r{job.get("server_revision", 1)}\nArchive: {job["file"] if job.get("file_present", True) else "missing"} / {job["size"]} MB / {"encrypted" if job["encrypted"] else "plaintext"}\nOther ports: filtered. Scan complete.'
                 elif app == 'cracker':
-                    if not state.get('scanned'):
+                    if not state.get('scanned') or state.get('scanned_revision', 1) != job.get('server_revision', 1):
                         raise GameError('No service fingerprint available.')
                     if args[0] != str(job['port']):
                         raise GameError('Connection refused on this port.')
                     state.update(access=True, dirty=True)
+                    record_action(slot, job, 'access_granted', 'Authentication compromised; filesystem mounted.')
                     result = 'Authentication compromised. Remote filesystem mounted.'
                 elif app == 'decryptor':
-                    if not state.get('access') or args[0] != job['file'] or state.get('deleted'):
+                    if not state.get('access') or args[0] != job['file'] or not job.get('file_present', True):
                         raise GameError('Archive unavailable or access denied.')
                     if not job['encrypted']:
                         raise GameError('This file is not encrypted.')
                     state.update(decrypted=True, dirty=True)
+                    record_action(slot, job, 'file_decrypted', f'{job["file"]} decrypted on the remote filesystem.', decrypt=True)
                     result = f'{job["file"]}: decrypted. Checksum intact.'
                 elif app == 'cleaner':
                     if not state.get('access'):
                         raise GameError('Permission denied: remote log partition locked.')
                     state['dirty'] = False
+                    clear_remote_logs(slot, job)
                     result = 'Remote access logs erased.'
     except GameError as exc:
         result = str(exc)
@@ -315,15 +328,21 @@ def execute(slot, app, raw):
             slot.mission_state['work'] = slot.mission_state.get('work', 0) + 6
     if slot.remote_host.get('_backdoor'):
         slot.mission_state['dirty'] = False
+    sync_remote_logs(slot)
     log(slot, app, result)
     settle(slot)
 
 
 def _shell(slot, verb, args, job):
-    arity = {'jump': 1, 'rumors': 0, 'apps': 0, 'contracts': 0, 'accept': 1, 'route': 0, 'status': 0, 'brief': 0, 'abort': 0, 'connect': 1, 'submit': 0, 'disconnect': 0, 'ls': 0, 'get': 1, 'rm': 1}
+    arity = {'history': 0, 'jump': 1, 'rumors': 0, 'apps': 0, 'contracts': 0, 'accept': 1, 'route': 0, 'status': 0, 'brief': 0, 'abort': 0, 'connect': 1, 'submit': 0, 'disconnect': 0, 'ls': 0, 'get': 1, 'rm': 1}
     if verb not in arity or len(args) != arity[verb]:
         raise GameError('Unknown shell command or arguments. Read help for the shell manual.')
     state = slot.mission_state
+    if verb == 'history':
+        if not job:
+            raise GameError('Connect to a server or reserve its contract to read its journal.')
+        server = ensure_server(slot, job)
+        return '\n'.join(f'{entry.created_at.isoformat()}  {entry.summary}' for entry in reversed(list(server.events.all()[:20]))) or 'No recorded history.'
     if verb == 'rumors':
         return 'Intercepted invitation: null-exchange.internal. Dial it from a local terminal; the public directory has no listing.'
     if verb in ('connect', 'jump'):
@@ -362,6 +381,7 @@ def _shell(slot, verb, args, job):
         transact(slot, job['reward'], f'Contract payment // {public_code(job["id"])}')
         slot.reputation += job['reputation']
         slot.completed += 1
+        record_contract(slot, job, timezone.now() + timedelta(seconds=SUCCESS_COOLDOWN))
         slot.contract_cooldowns = {**slot.contract_cooldowns, job['id']: (timezone.now() + timedelta(seconds=SUCCESS_COOLDOWN)).isoformat()}
         slot.active_contract = ''
         slot.mission_state = {}
@@ -372,6 +392,7 @@ def _shell(slot, verb, args, job):
         if state.get('dirty'):
             fail(slot, 'Forensics recovered your access logs after disconnect.')
             return 'Remote link closed.'
+        record_action(slot, job, 'disconnected', 'Remote session closed with no new access signature.')
         slot.mission_started = None
         state.update(clean_exit=True, access=False)
         slot.remote_host = {}
@@ -381,18 +402,21 @@ def _shell(slot, verb, args, job):
             raise GameError('Permission denied.')
         if verb == 'ls' and not args:
             state['dirty'] = True
-            return 'Directory empty.' if state.get('deleted') else f'{job["file"]}  {job["size"]} MB  {"encrypted" if job["encrypted"] and not state.get("decrypted") else "readable"}'
-        if len(args) != 1 or args[0] != job['file'] or state.get('deleted'):
+            record_action(slot, job, 'directory_listed', 'Remote directory inspected.', snapshot=True)
+            return 'Directory empty.' if not job.get('file_present', True) else f'{job["file"]}  {job["size"]} MB  {"encrypted" if job["encrypted"] and not state.get("decrypted") else "readable"}'
+        if len(args) != 1 or args[0] != job['file'] or not job.get('file_present', True):
             raise GameError('File not found.')
         if verb == 'get':
             if job['encrypted'] and not state.get('decrypted'):
                 raise GameError('Archive encrypted. Broker cannot accept ciphertext.')
             if job['size'] > hardware(slot)['storage']['capacity']:
                 raise GameError('Local storage full. Transfer failed.')
+            record_action(slot, job, 'file_retrieved', f'{job["file"]} copied to local storage.')
             state.update(recovered=True, local_size=job['size'], dirty=True)
             state['work'] = state.get('work', 0) + math.ceil(job['size'] / hardware(slot)['gateway']['bandwidth'] + state.get('latency', 0) / 10)
             return f'Copied {job["file"]} to local storage. {job["size"]} MB verified.'
         if verb == 'rm':
+            record_action(slot, job, 'file_deleted', f'{job["file"]} removed from the remote filesystem.', delete=True)
             state.update(deleted=True, dirty=True)
             return f'{job["file"]} removed. Deletion receipt stored locally.'
     raise GameError('Unknown shell command or arguments. Read help for the shell manual.')

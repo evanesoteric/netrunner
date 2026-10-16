@@ -2,6 +2,28 @@
 
 A browser-based hacker game inspired by the atmosphere of Uplink. Django 5.2 and PostgreSQL 17 own the game state; Vue 3 and Vite power the interface. Hacking takes place entirely inside a fictional, simulated network.
 
+## v0.7 — Field Notes and persistent server histories
+
+**Field Notes** is a sidebar notebook for the current save. It supports 50,000 characters and autosaves after 800 ms without typing. Saving status, manual Save now, failure messages, and Retry make persistence visible. Each save has its own PostgreSQL text, revision, and update time.
+
+Switching panels keeps the editor and its draft alive. An unsaved recovery draft is also stored in this browser, scoped to the account, slot, and runner creation identity. Each tab keeps its own session recovery copy, with a browser-wide last-draft fallback. Failed saves survive a reload in the same browser; this recovery draft is not a database backup or cross-device sync. If browser storage is unavailable, the editor warns you. Closing a tab with unsaved edits prompts the browser's normal warning. Two windows editing older revisions receive a conflict instead of silently overwriting each other: inspect the saved version, then choose Use saved version or Save my draft. A delayed autosave from a restarted runner cannot write into the new life.
+
+**Server Histories** is a sidebar journal of the servers this save has discovered. Contract targets, generated missions, directory servers, the hidden market, and Wraith links share durable identities by fictional hostname. Saves have independent server worlds. Visits, proxy transits, scans, authentication, file retrieval/deletion/decryption, remote log cleanup, connections, contract completion, rootkit installation, ransomware deployment/payment, and administrator maintenance are recorded. The local terminal's `history` command also shows recent events for its current or reserved target.
+
+Files no longer reset when you reconnect. A removed archive stays missing; a decrypted archive stays readable. Remote access-log entries persist until cleared or archived by maintenance. Ashfall clears remote logs but leaves your private operator journal intact. The history viewer shows your **last observed** filesystem and service fingerprint, not an automatically refreshed scan, and supports loading older journal events.
+
+Administrator maintenance is deterministic and processed on the next game request after its deadline, including after time away:
+
+- Verified contracts schedule archive replacement at their five-minute broker cooldown.
+- File deletion, detected intrusion, and completed ransomware operations schedule maintenance in ten minutes; an earlier existing deadline wins.
+- Maintenance restores the original archive, moves it to `archive/r<revision>/<filename>`, rotates authentication ports between 22/2222 or 443/8443, and records the patch revision. Security capability classes remain stable.
+- An active connection to that server postpones its maintenance until disconnect. Other servers can still undergo maintenance.
+- Scan again after a patch: old fingerprints cannot authenticate the changed service. Use the current archive path shown by a scan or directory listing for `get`, `rm`, and `decrypt`. Broker briefs retain the original artifact name.
+
+Wraith links remain installed across maintenance. Direct links still bypass proxy leases, suppress remote access logging, and have no trace countdown. Eclipse keeps the existing three-instance cap, two-minute duration, and payout values. The economy-balancing work remains deferred in [TODO.md](TODO.md).
+
+Migration `0006` preserves known active mission state, deleted/decrypted artifacts, dirty logs, existing backdoors, and pending operations. It does not invent a history of visits from before this feature. Notes, server state, and journal events survive normal restarts, sign-out, and PostgreSQL dump/restore. Restarting a runner clears that save's notes and world histories along with its other progress; other saves are untouched. The existing development-build database reset policy still applies, so export before a fresh build if you want to retain progress.
+
 ## v0.6 — generated world content and the hidden market
 
 ### Offline development administration
@@ -222,7 +244,7 @@ With `scripts/dev.sh` running:
 bash scripts/test.sh
 ```
 
-This runs the Django suite against a separate PostgreSQL test database, builds Vue, and runs Chromium browser tests. The database role needs permission to create the test database and a disposable lifecycle database. The lifecycle check uses `pg_dump` and `pg_restore` from PATH or `NETRUNNER_PG_BIN`, and verifies actual drop/recreation, restart persistence, and an archive round trip including generated content, backdoors, and pending operations. It is skipped if those client tools are unavailable. Browser tests create accounts prefixed `e2e_` in the development database. They verify hidden-market purchases, persistent direct backdoors, ransomware deployment, the manual tools-and-proxy contract loop, persistent cursor focus (including failed requests), bank charges, purchases/fitting/resale, three saves, sign-in persistence, confirmed bankruptcy recovery, and mobile layouts. The epic-market browser scenario uses the native Django environment to seed an offline test account with funds and memory; no public cheat API is provided. Set `CHROMIUM_PATH` if Chromium is not at `/usr/bin/chromium`.
+This runs the Django suite against a separate PostgreSQL test database, builds Vue, and runs Chromium browser tests. The database role needs permission to create the test database and a disposable lifecycle database. The lifecycle check uses `pg_dump` and `pg_restore` from PATH or `NETRUNNER_PG_BIN`, and verifies actual drop/recreation, restart persistence, and an archive round trip including generated content, backdoors, pending operations, Field Notes, and persistent server journals. It is skipped if those client tools are unavailable. Browser tests create accounts prefixed `e2e_` in the development database. They verify notebook autosave, conflicting edits and draft recovery, persistent server maintenance, hidden-market purchases, persistent direct backdoors, ransomware deployment, the manual tools-and-proxy contract loop, persistent cursor focus (including failed requests), bank charges, purchases/fitting/resale, three saves, sign-in persistence, confirmed bankruptcy recovery, and mobile layouts. The epic-market browser scenario uses the native Django environment to seed an offline test account with funds and memory; no public cheat API is provided. Set `CHROMIUM_PATH` if Chromium is not at `/usr/bin/chromium`.
 
 Backend-only checks:
 

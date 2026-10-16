@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.db import models
 from django.db.models import Q
+from django.utils import timezone
 from .catalog import rank_for, STARTER_EQUIPMENT, STARTER_SOFTWARE, STARTER_ATLAS_NODES
 
 
@@ -42,6 +43,9 @@ class SaveSlot(models.Model):
     ransomware_ops = models.JSONField(default=list)
     remote_host = models.JSONField(default=dict)
     market_unlocked = models.BooleanField(default=False)
+    field_notes = models.TextField(blank=True, default='')
+    notes_revision = models.PositiveIntegerField(default=0)
+    notes_updated_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     class Meta:
         constraints = [models.UniqueConstraint(fields=['user', 'position'], name='unique_user_save_position'), models.CheckConstraint(condition=Q(position__gte=1, position__lte=3), name='three_save_slots')]
@@ -77,3 +81,34 @@ class DirectoryServer(models.Model):
 class GeneratedMission(models.Model):
     key = models.CharField(max_length=12, primary_key=True)
     data = models.JSONField()
+
+
+class ServerState(models.Model):
+    slot = models.ForeignKey(SaveSlot, on_delete=models.CASCADE, related_name='server_states')
+    address = models.CharField(max_length=100)
+    descriptor = models.JSONField(default=dict)
+    files = models.JSONField(default=list)
+    security = models.PositiveSmallIntegerField(default=1)
+    port = models.PositiveIntegerField(default=22)
+    revision = models.PositiveIntegerField(default=1)
+    visits = models.PositiveIntegerField(default=0)
+    remote_logs = models.JSONField(default=list)
+    observed = models.JSONField(default=dict)
+    backdoor_installed = models.BooleanField(default=False)
+    maintenance_due = models.DateTimeField(null=True, blank=True)
+    last_visit = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['slot', 'address'], name='unique_save_server_state')]
+        ordering = ['address']
+
+
+class ServerEvent(models.Model):
+    server = models.ForeignKey(ServerState, on_delete=models.CASCADE, related_name='events')
+    kind = models.CharField(max_length=32)
+    summary = models.CharField(max_length=300)
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ['-id']

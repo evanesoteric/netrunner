@@ -545,6 +545,23 @@ class ConcurrentEconomyTests(APIHelpers, TransactionTestCase):
         self.assertEqual(self.slot.ransomware_ops, [])
         self.assertEqual(self.slot.ledger.filter(description__startswith='Ransomware payout').count(), 1)
 
+    def test_concurrent_note_edits_cannot_silently_overwrite_each_other(self):
+        identity = self.slot.created_at.isoformat()
+        def edit(text):
+            close_old_connections()
+            try:
+                client = Client()
+                client.cookies = self.client.cookies.copy()
+                return client.post(f'/api/slots/{self.slot.pk}/notes/', json.dumps({'text': text, 'revision': 0, 'identity': identity}), content_type='application/json').status_code
+            finally:
+                close_old_connections()
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            outcomes = list(pool.map(edit, ['first window', 'second window']))
+        self.assertCountEqual(outcomes, [200, 409])
+        self.slot.refresh_from_db()
+        self.assertEqual(self.slot.notes_revision, 1)
+        self.assertIn(self.slot.field_notes, ['first window', 'second window'])
+
 
 class LegacySaveMigrationTests(TransactionTestCase):
     def test_legacy_equipment_balances_and_ledger_survive(self):
@@ -681,6 +698,10 @@ class DevelopmentDatabaseLifecycleTests(TestCase):
                     "slot = SaveSlot.objects.get(alias='Archive'); slot.backdoors = [target_for_server(get_server('world-0'))]; "
                     "slot.ransomware_ops = [dict(target='vesper-dispatch.internal', due_at=(timezone.now()+timedelta(seconds=120)).isoformat(), reward=800)]; "
                     "slot.market_unlocked=True; slot.installed_software += ['rootkit-epic', 'ransomware-epic']; slot.save()")
+                run(sys.executable, str(manage), 'shell', '-c',
+                    "from game.models import SaveSlot; from game.world import get_server, target_for_server; from game.persistence import ensure_server, event; "
+                    "slot = SaveSlot.objects.get(alias='Archive'); slot.field_notes='Archive notebook: follow the old relay'; slot.notes_revision=2; slot.save(); "
+                    "server = ensure_server(slot, target_for_server(get_server('world-0'))); server.files[0]['present']=False; server.visits=3; server.save(); event(server, 'file_deleted', 'Archive proof retained')")
                 identities = query('SELECT template_key, code FROM game_contractidentity ORDER BY template_key')
                 query('CREATE TABLE lifecycle_probe (value text)')
                 query("INSERT INTO lifecycle_probe VALUES ('backup survives')")
@@ -703,6 +724,9 @@ class DevelopmentDatabaseLifecycleTests(TestCase):
                 self.assertEqual(query('SELECT amount, description FROM game_ledgerentry'), [(-90, 'Archive test receipt')])
                 self.assertEqual(query('SELECT count(*) FROM game_generatedmission'), [(1,)])
                 self.assertEqual(query('SELECT count(*) FROM game_directoryserver'), [(6,)])
+                self.assertEqual(query('SELECT field_notes, notes_revision FROM game_saveslot'), [('Archive notebook: follow the old relay', 2)])
+                self.assertEqual(query("SELECT address, visits, files->0->>'present' FROM game_serverstate"), [('vesper-dispatch.internal', 3, 'false')])
+                self.assertEqual(query("SELECT count(*) FROM game_serverevent WHERE kind='file_deleted'"), [(1,)])
                 self.assertEqual(query("SELECT backdoors->0->>'target', ransomware_ops->0->>'reward', market_unlocked FROM game_saveslot"), [('vesper-dispatch.internal', '800', True)])
         finally:
             with psycopg.connect(dbname='postgres', autocommit=True, **params) as maintenance:
@@ -904,3 +928,249 @@ class HiddenOperationsTests(APIHelpers, TestCase):
         self.assertFalse(response['market_unlocked'])
         other.refresh_from_db()
         self.assertTrue(other.market_unlocked)
+
+
+class FieldNotesTests(APIHelpers, TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user('notebook')
+        self.client.force_login(self.user)
+        self.slot = SaveSlot.objects.create(user=self.user, position=1, alias='Notebook')
+
+    def note(self):
+        return self.client.get(f'/api/{self.endpoint("notes")}/').json()
+
+    def write(self, text, revision=0, status=200, identity=None):
+        return self.post(self.endpoint('notes'), {'text': text, 'revision': revision, 'identity': identity or self.note()['identity']}, status)
+
+    def test_notes_preserve_unicode_whitespace_and_are_separate_per_save(self):
+        text = '  Intel → library\n\nAlias: λ-runner 🛰️\n'
+        result = self.write(text)
+        self.assertEqual(result['text'], text)
+        self.assertEqual(result['revision'], 1)
+        other = SaveSlot.objects.create(user=self.user, position=2, alias='Other')
+        self.assertEqual(self.client.get(f'/api/slots/{other.pk}/notes/').json()['text'], '')
+        self.client.logout()
+        self.client.force_login(self.user)
+        self.assertEqual(self.note()['text'], text)
+        self.assertEqual(self.write('', revision=1)['text'], '')
+        self.assertEqual(self.note()['revision'], 2)
+
+    def test_conflicts_retain_newer_notes_and_identical_retries_are_idempotent(self):
+        first = self.write('first draft')
+        self.assertEqual(self.write('first draft', revision=0)['revision'], 1)
+        conflict = self.write('stale other draft', revision=0, status=409)
+        self.assertEqual(conflict['note']['text'], 'first draft')
+        self.assertEqual(self.note()['text'], 'first draft')
+        self.assertEqual(self.write('reviewed merge', revision=first['revision'])['revision'], 2)
+
+    def test_validation_authentication_and_ownership(self):
+        for text, revision in [('x' * 50001, 0), (None, 0), ('null\x00byte', 0), ('text', True), ('text', -1)]:
+            self.write(text, revision=revision, status=400)
+        outsider = get_user_model().objects.create_user('notebook-outsider')
+        other_slot = SaveSlot.objects.create(user=outsider, position=1, alias='Other')
+        self.post(f'slots/{other_slot.pk}/notes', {'text': 'injected', 'revision': 0}, 404)
+        self.assertEqual(self.client.get(f'/api/slots/{other_slot.pk}/notes/').status_code, 404)
+        self.client.logout()
+        self.assertEqual(self.client.get(f'/api/{self.endpoint("notes")}/').status_code, 401)
+
+    def test_notes_csrf_and_old_drafts_cannot_resurrect_a_restarted_save(self):
+        csrf_client = Client(enforce_csrf_checks=True)
+        csrf_client.force_login(self.user)
+        self.assertEqual(csrf_client.post(f'/api/{self.endpoint("notes")}/', '{}', content_type='application/json').status_code, 403)
+        identity = self.note()['identity']
+        self.write('old life')
+        self.post(self.endpoint('restart'), {'confirmation': 'Notebook'})
+        self.write('delayed autosave', revision=0, identity=identity, status=409)
+        self.assertEqual(self.note()['text'], '')
+        self.assertNotEqual(self.note()['identity'], identity)
+
+
+class PersistentWorldTests(APIHelpers, TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user('historian')
+        self.client.force_login(self.user)
+        self.slot = SaveSlot.objects.create(user=self.user, position=1, alias='Historian', balance=10000)
+        self.slot.equipment['memory'] = 'memory-2-specialist'
+        self.slot.owned_hardware.append('memory-2-specialist')
+        self.slot.installed_software += ['rootkit-epic', 'ransomware-epic', 'decryptor-1-standard']
+        self.slot.save()
+
+    def mount(self, address='vesper-dispatch.internal', port=22):
+        self.launch('terminal')
+        self.launch('mapper-1-standard')
+        self.cmd(f'scan {address}', 'mapper')
+        self.cmd(f'connect {address}')
+        self.launch('cracker-1-standard')
+        result = self.cmd(f'crack {port}', 'cracker')
+        self.assertIn('filesystem mounted', self.log_text(result))
+
+    def history(self, address='vesper-dispatch.internal'):
+        return self.client.get(f'/api/{self.endpoint("history")}/', {'server': address}).json()
+
+    def test_deleted_files_remain_missing_and_journal_survives_log_erasure(self):
+        self.mount()
+        self.cmd('rm public-index.dat')
+        self.clean_exit()
+        self.client.logout()
+        self.client.force_login(self.user)
+        self.mount()
+        result = self.cmd('ls')
+        self.assertIn('Directory empty', result['mission_log'][-1]['text'])
+        self.assertIn('File not found', self.cmd('get public-index.dat')['mission_log'][-1]['text'])
+        history = self.history()
+        self.assertIn('file_deleted', {entry['kind'] for entry in history['events']})
+        self.assertIn('logs_erased', {entry['kind'] for entry in history['events']})
+        self.assertFalse(history['servers'][0]['observed']['files'][0]['present'])
+        self.assertEqual(history['servers'][0]['visits'], 2)
+        other = SaveSlot.objects.create(user=self.user, position=2, alias='Independent')
+        self.assertFalse(other.server_states.exists())
+        self.assertEqual(self.client.get(f'/api/slots/{other.pk}/history/', {'server': 'vesper-dispatch.internal'}).status_code, 404)
+
+    def test_decryption_changes_the_remote_file_beyond_one_session(self):
+        self.gain_access('0-1')
+        self.launch('decryptor-1-standard')
+        self.cmd('decrypt ledger.enc', 'decryptor')
+        self.clean_exit()
+        self.slot.refresh_from_db()
+        self.slot.mission_state.pop('decrypted', None)
+        self.slot.save()
+        self.cmd('connect helix-1.internal')
+        self.cmd('crack 443', 'cracker')
+        result = self.cmd('get ledger.enc')
+        self.assertIn('Copied ledger.enc', result['mission_log'][-1]['text'])
+        self.assertFalse(self.slot.server_states.get(address='helix-1.internal').files[0]['encrypted'])
+
+    def test_contract_replacement_restores_moves_files_and_rotates_service(self):
+        from unittest.mock import patch
+        self.gain_access('0-2')
+        self.cmd('rm audit.log')
+        self.clean_exit()
+        self.cmd('submit')
+        server = self.slot.server_states.get(address='helix-2.internal')
+        self.assertFalse(server.files[0]['present'])
+        with patch('django.utils.timezone.now', return_value=timezone.now() + timedelta(seconds=301)):
+            self.refresh()
+            server.refresh_from_db()
+            self.assertEqual(server.port, 2222)
+            self.assertEqual(server.files[0]['name'], 'archive/r2/audit.log')
+            self.assertTrue(server.files[0]['present'])
+            self.assertFalse(server.observed['files'][0]['present'])
+            self.reserve('0-2')
+            scan = self.cmd('scan helix-2.internal', 'mapper')
+            self.assertIn('2222/tcp', scan['mission_log'][-1]['text'])
+            self.cmd('connect helix-2.internal')
+            self.assertIn('Connection refused', self.cmd('crack 22', 'cracker')['mission_log'][-1]['text'])
+            self.cmd('crack 2222', 'cracker')
+            self.cmd('rm archive/r2/audit.log')
+            self.clean_exit()
+            result = self.cmd('submit')
+            self.assertEqual(result['completed'], 2)
+        self.assertEqual(server.events.filter(kind='administrator_patch').count(), 1)
+
+    def test_live_wraith_session_delays_maintenance_without_losing_backdoor(self):
+        from unittest.mock import patch
+        self.mount()
+        self.launch('rootkit-epic')
+        self.cmd('install', 'rootkit')
+        self.clean_exit()
+        server = self.slot.server_states.get(address='vesper-dispatch.internal')
+        server.maintenance_due = timezone.now() + timedelta(seconds=10)
+        server.save()
+        before = self.refresh()['balance']
+        self.post(self.endpoint('backdoors'), {'target': server.address})
+        with patch('django.utils.timezone.now', return_value=timezone.now() + timedelta(seconds=601)):
+            self.refresh()
+            server.refresh_from_db()
+            self.assertEqual(server.revision, 1)
+            self.cmd('disconnect')
+            server.refresh_from_db()
+            self.assertEqual(server.revision, 2)
+            connected = self.post(self.endpoint('backdoors'), {'target': server.address})
+            self.assertEqual(connected['balance'], before)
+            self.assertTrue(connected['stealth_session'])
+            self.assertIn('archive/r2/public-index.dat', self.cmd('ls')['mission_log'][-1]['text'])
+            server.refresh_from_db()
+            self.assertTrue(server.backdoor_installed)
+            self.assertEqual(server.remote_logs, [])
+
+    def test_proxy_transits_are_recorded_and_wraith_jumps_bypass_the_saved_chain(self):
+        self.post(self.endpoint('route'), {'nodes': ['london', 'berlin']})
+        self.mount()
+        intel = self.slot.server_states.get(address='intel-public.internal')
+        self.assertEqual(intel.visits, 1)
+        self.assertEqual(intel.events.filter(kind='proxy_transit').count(), 1)
+        self.launch('rootkit-epic')
+        self.cmd('install', 'rootkit')
+        self.clean_exit()
+        self.post(self.endpoint('backdoors'), {'target': 'vesper-dispatch.internal'})
+        intel.refresh_from_db()
+        self.assertEqual(intel.visits, 1)
+
+    def test_stale_fingerprint_requires_a_new_scan_after_maintenance(self):
+        from unittest.mock import patch
+        self.launch('terminal')
+        self.launch('mapper-1-standard')
+        self.cmd('scan vesper-dispatch.internal', 'mapper')
+        server = self.slot.server_states.get(address='vesper-dispatch.internal')
+        server.maintenance_due = timezone.now() + timedelta(seconds=10)
+        server.save()
+        with patch('django.utils.timezone.now', return_value=timezone.now() + timedelta(seconds=11)):
+            self.cmd('connect vesper-dispatch.internal')
+            self.launch('cracker-1-standard')
+            self.assertIn('No service fingerprint', self.cmd('crack 2222', 'cracker')['mission_log'][-1]['text'])
+            self.cmd('scan vesper-dispatch.internal', 'mapper')
+            self.assertIn('filesystem mounted', self.cmd('crack 2222', 'cracker')['mission_log'][-1]['text'])
+
+    def test_ransomware_events_and_payments_are_persistent_without_economy_changes(self):
+        from unittest.mock import patch
+        self.mount()
+        self.launch('ransomware-epic')
+        self.cmd('deploy vesper-dispatch.internal', 'ransomware')
+        self.clean_exit()
+        before = self.refresh()['balance']
+        with patch('django.utils.timezone.now', return_value=timezone.now() + timedelta(seconds=121)):
+            self.assertEqual(self.refresh()['balance'], before + 800)
+            self.assertEqual(self.refresh()['balance'], before + 800)
+        kinds = {entry['kind'] for entry in self.history()['events']}
+        self.assertTrue({'ransomware_deployed', 'ransomware_completed'} <= kinds)
+
+    def test_history_paginates_checks_ownership_and_restart_clears_only_one_world(self):
+        from .models import ServerEvent
+        self.mount()
+        server = self.slot.server_states.get(address='vesper-dispatch.internal')
+        ServerEvent.objects.bulk_create([ServerEvent(server=server, kind='test_entry', summary=f'Entry {index}') for index in range(55)])
+        first = self.history()
+        self.assertEqual(len(first['events']), 50)
+        second = self.client.get(f'/api/{self.endpoint("history")}/', {'server': server.address, 'before': first['next_before']}).json()
+        self.assertFalse({row['id'] for row in first['events']} & {row['id'] for row in second['events']})
+        outsider = get_user_model().objects.create_user('world-outsider')
+        other = SaveSlot.objects.create(user=outsider, position=1, alias='Other')
+        self.assertEqual(self.client.get(f'/api/slots/{other.pk}/history/').status_code, 404)
+        self.post(self.endpoint('restart'), {'confirmation': 'Historian'})
+        self.assertFalse(self.slot.server_states.exists())
+
+
+class PersistentWorldMigrationTests(TransactionTestCase):
+    def test_live_mission_files_backdoors_and_pending_operations_are_preserved(self):
+        from .catalog import CONTRACT_BY_ID
+        executor = MigrationExecutor(connection)
+        executor.migrate([('game', '0005_directoryserver_generatedmission_saveslot_backdoors_and_more')])
+        try:
+            old = executor.loader.project_state([('game', '0005_directoryserver_generatedmission_saveslot_backdoors_and_more')]).apps
+            user = old.get_model('auth', 'User').objects.create(username='persistent-veteran')
+            slot = old.get_model('game', 'SaveSlot').objects.create(user_id=user.pk, position=1, alias='Veteran', balance=4321, active_contract='0-2', mission_started=timezone.now(), mission_state={'deleted': True, 'scanned': True, 'dirty': True}, backdoors=[CONTRACT_BY_ID['0-2']], ransomware_ops=[{'target': 'vesper-dispatch.internal', 'due_at': (timezone.now() + timedelta(seconds=120)).isoformat(), 'reward': 800}])
+            upgrade = MigrationExecutor(connection)
+            upgrade.migrate(upgrade.loader.graph.leaf_nodes())
+            from .models import SaveSlot
+            saved = SaveSlot.objects.get(pk=slot.pk)
+            state = saved.server_states.get(address='helix-2.internal')
+            self.assertFalse(state.files[0]['present'])
+            self.assertTrue(state.backdoor_installed)
+            self.assertEqual(len(state.remote_logs), 1)
+            self.assertTrue(saved.server_states.filter(address='vesper-dispatch.internal').exists())
+            self.assertEqual(saved.balance, 4321)
+            self.assertEqual(saved.field_notes, '')
+            self.assertEqual(saved.active_contract, '0-2')
+        finally:
+            restore = MigrationExecutor(connection)
+            restore.migrate(restore.loader.graph.leaf_nodes())

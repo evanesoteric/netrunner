@@ -49,7 +49,7 @@ def serialize(slot, detailed=False):
     target = session_target(slot)
     remaining = trace_remaining(slot) if monitor and target and monitor['power'] >= target['security'] else None
     data = {
-        'id': slot.id, 'position': slot.position, 'alias': slot.alias,
+        'id': slot.id, 'position': slot.position, 'alias': slot.alias, 'created_at': slot.created_at,
         'balance': slot.balance, 'reputation': slot.reputation, 'rank': slot.rank,
         'rank_name': RANKS[slot.rank],
         'next_rank_at': THRESHOLDS[slot.rank + 1] if slot.rank + 1 < len(RANKS) else None,
@@ -95,7 +95,7 @@ def serialize(slot, detailed=False):
 @ensure_csrf_cookie
 @api(['GET'], authenticated=False)
 def session(request):
-    return JsonResponse({'user': {'username': request.user.username} if request.user.is_authenticated else None, 'currency': CURRENCY, 'ranks': RANKS, 'version': '0.6.0', 'server_time': timezone.now().isoformat()})
+    return JsonResponse({'user': {'username': request.user.username} if request.user.is_authenticated else None, 'currency': CURRENCY, 'ranks': RANKS, 'version': '0.7.0', 'server_time': timezone.now().isoformat()})
 
 @api(['POST'], authenticated=False)
 def register(request):
@@ -231,11 +231,12 @@ def restart(request, slot_id):
     if request.data.get('confirmation') != slot.alias:
         raise GameError('Type the runner alias exactly to confirm restarting this slot.')
     fresh = SaveSlot(user=request.user, alias=slot.alias, position=slot.position)
-    for field in ['balance', 'reputation', 'completed', 'equipment', 'owned_hardware', 'installed_software', 'running_apps', 'proxy_route', 'atlas_nodes', 'active_contract', 'mission_started', 'mission_state', 'mission_log', 'contract_cooldowns', 'backdoors', 'ransomware_ops', 'remote_host', 'market_unlocked']:
+    for field in ['balance', 'reputation', 'completed', 'equipment', 'owned_hardware', 'installed_software', 'running_apps', 'proxy_route', 'atlas_nodes', 'active_contract', 'mission_started', 'mission_state', 'mission_log', 'contract_cooldowns', 'backdoors', 'ransomware_ops', 'remote_host', 'market_unlocked', 'field_notes', 'notes_revision', 'notes_updated_at']:
         setattr(slot, field, getattr(fresh, field))
     slot.created_at = timezone.now()
     slot.save()
     slot.ledger.all().delete()
+    slot.server_states.all().delete()
     LedgerEntry.objects.create(slot=slot, amount=1200, description='Restarted runner // initial funding')
     return JsonResponse(serialize(slot, True))
 
@@ -279,3 +280,63 @@ def backdoor_connect(request, slot_id):
     log(slot, 'terminal', message)
     slot.save()
     return JsonResponse(serialize(slot, True))
+
+
+def note_data(slot):
+    return {'text': slot.field_notes, 'revision': slot.notes_revision,
+            'updated_at': slot.notes_updated_at, 'identity': slot.created_at.isoformat()}
+
+
+@api(['GET', 'POST'])
+@transaction.atomic
+def field_notes(request, slot_id):
+    slot = SaveSlot.objects.select_for_update().get(pk=slot_id, user=request.user)
+    if request.method == 'GET':
+        return JsonResponse(note_data(slot))
+    if request.data.get('identity') != slot.created_at.isoformat():
+        return JsonResponse({'error': 'This save was restarted or replaced. Its previous draft cannot overwrite the new notes.', 'note': note_data(slot)}, status=409)
+    text = request.data.get('text')
+    revision = request.data.get('revision')
+    if not isinstance(text, str) or len(text) > 50000 or '\x00' in text:
+        raise GameError('Notes must contain at most 50,000 characters and no null characters.')
+    if type(revision) is not int or revision < 0:
+        raise GameError('A valid notes revision is required.')
+    if revision != slot.notes_revision and text != slot.field_notes:
+        return JsonResponse({'error': 'Newer notes were saved in another window. Your draft has not overwritten them.', 'note': note_data(slot)}, status=409)
+    if text != slot.field_notes:
+        slot.field_notes = text
+        slot.notes_revision += 1
+        slot.notes_updated_at = timezone.now()
+        slot.save(update_fields=['field_notes', 'notes_revision', 'notes_updated_at'])
+    return JsonResponse(note_data(slot))
+
+
+@api(['GET'])
+@transaction.atomic
+def server_history(request, slot_id):
+    slot = SaveSlot.objects.select_for_update().get(pk=slot_id, user=request.user)
+    settle(slot)
+    servers = list(slot.server_states.all())
+    summaries = [dict(address=server.address, name=server.descriptor.get('name') or server.descriptor.get('title') or server.address,
+                      revision=server.revision, visits=server.visits, last_visit=server.last_visit,
+                      observed=server.observed, remote_log_count=len(server.remote_logs),
+                      backdoor_installed=server.backdoor_installed, maintenance_due=server.maintenance_due)
+                 for server in servers]
+    address = request.GET.get('server')
+    events = []
+    next_before = None
+    if address:
+        server = next((server for server in servers if server.address == address), None)
+        if not server:
+            return JsonResponse({'error': 'No history for this server in this save.'}, status=404)
+        query = server.events.all()
+        before = request.GET.get('before')
+        if before:
+            if not before.isdecimal() or len(before) > 18:
+                raise GameError('Invalid history cursor.')
+            query = query.filter(id__lt=int(before))
+        rows = list(query[:51])
+        events = [dict(id=row.id, kind=row.kind, summary=row.summary, created_at=row.created_at) for row in rows[:50]]
+        if len(rows) > 50:
+            next_before = rows[49].id
+    return JsonResponse({'servers': summaries, 'events': events, 'next_before': next_before, 'server_time': timezone.now().isoformat()})

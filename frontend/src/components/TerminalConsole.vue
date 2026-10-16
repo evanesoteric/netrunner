@@ -37,7 +37,7 @@ onMounted(async () => { await scroll(); focus() })
   <section class="panel terminal-panel">
     <div class="panel-title"><span><Terminal :size="16" /> {{ name.toUpperCase() }}</span><span class="panel-meta">{{ application === 'bank' ? 'CIPHER PRIVATE ACCOUNT' : slot.connected ? 'REMOTE LINK ACTIVE' : 'LOCAL SESSION' }}</span></div>
     <div ref="output" class="terminal-log" role="log" :aria-label="`${application} output`" @pointerup="focusOutput">
-      <div class="terminal-banner">NETRUNNER / {{ application.toUpperCase() }} [v0.6]<br>{{ application === 'terminal' ? 'Local shell ready. Each installed application has its own console.' : 'Application process ready.' }} Type help for its reference manual.<br>─────────────────────────────────────────────────────</div>
+      <div class="terminal-banner">NETRUNNER / {{ application.toUpperCase() }} [v0.7]<br>{{ application === 'terminal' ? 'Local shell ready. Each installed application has its own console.' : 'Application process ready.' }} Type help for its reference manual.<br>─────────────────────────────────────────────────────</div>
       <pre v-for="(entry, i) in entries" :key="i">{{ entry.text }}</pre>
       <span v-if="busy" class="terminal-muted" role="status">PROCESSING…</span>
     </div>

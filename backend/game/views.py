@@ -7,9 +7,10 @@ from django.db import transaction, IntegrityError
 from django.http import JsonResponse
 from django.utils import timezone
 from django.views.decorators.csrf import ensure_csrf_cookie
+from .contracts import codes, public_job
 from .models import SaveSlot, LedgerEntry
 from .catalog import CONTRACTS, CONTRACT_BY_ID, CURRENCY, RANKS, THRESHOLDS, PRODUCTS, BUILTIN_APPS, RELAYS, HOME_NODE
-from .mechanics import GameError, hardware, ram_used, route_stats, available_at, trace_remaining, settle, launch, trade, validate_route, execute, edit_directory
+from .mechanics import GameError, hardware, ram_used, route_stats, available_at, trace_remaining, settle, launch, trade, validate_route, execute, edit_directory, reserve, fail
 
 def api(methods, authenticated=True):
     def decorate(fn):
@@ -40,6 +41,7 @@ def text_field(data, key, maximum):
     return value.strip()
 
 def serialize(slot, detailed=False):
+    mapping = codes()
     monitor = PRODUCTS.get(slot.running_apps.get('monitor', ''))
     job = CONTRACT_BY_ID.get(slot.active_contract)
     remaining = trace_remaining(slot) if monitor and job and monitor['power'] >= job['security'] else None
@@ -49,7 +51,7 @@ def serialize(slot, detailed=False):
         'rank_name': RANKS[slot.rank],
         'next_rank_at': THRESHOLDS[slot.rank + 1] if slot.rank + 1 < len(RANKS) else None,
         'rank_floor': THRESHOLDS[slot.rank], 'completed': slot.completed,
-        'active_contract': CONTRACT_BY_ID.get(slot.active_contract),
+        'active_contract': public_job(job, mapping),
         'connected': bool(slot.mission_started),
         'mission_log': slot.mission_log,
         'trace_remaining': remaining if 'monitor' in slot.running_apps else None,
@@ -60,7 +62,7 @@ def serialize(slot, detailed=False):
         for job in CONTRACTS:
             if abs(job['rank'] - slot.rank) <= 1:
                 ready = available_at(slot, job['id'])
-                contracts.append({**job, 'available_at': ready.isoformat() if ready else None})
+                contracts.append({**public_job(job, mapping), 'available_at': ready.isoformat() if ready else None})
         data.update({
             'contracts': contracts,
             'equipment': hardware(slot),
@@ -82,7 +84,7 @@ def serialize(slot, detailed=False):
 @ensure_csrf_cookie
 @api(['GET'], authenticated=False)
 def session(request):
-    return JsonResponse({'user': {'username': request.user.username} if request.user.is_authenticated else None, 'currency': CURRENCY, 'ranks': RANKS, 'version': '0.4.0', 'server_time': timezone.now().isoformat()})
+    return JsonResponse({'user': {'username': request.user.username} if request.user.is_authenticated else None, 'currency': CURRENCY, 'ranks': RANKS, 'version': '0.5.0', 'server_time': timezone.now().isoformat()})
 
 @api(['POST'], authenticated=False)
 def register(request):
@@ -231,3 +233,23 @@ def restart(request, slot_id):
 def legacy_action(request, slot_id):
     SaveSlot.objects.get(pk=slot_id, user=request.user)
     return JsonResponse({'error': 'This v0.1 action has been retired. Reserve contracts in the local terminal; manage individual products in the exchange.'}, status=410)
+
+
+@api(['POST'])
+@transaction.atomic
+def contract_action(request, slot_id):
+    slot = SaveSlot.objects.select_for_update().get(pk=slot_id, user=request.user)
+    settle(slot)
+    code = text_field(request.data, 'contract_id', 3)
+    action = request.data.get('action')
+    if action == 'accept':
+        reserve(slot, code)
+    elif action == 'abort':
+        current = CONTRACT_BY_ID.get(slot.active_contract)
+        if not current or public_job(current)['id'] != code:
+            raise GameError('That assignment is no longer reserved. Refresh the broker.')
+        fail(slot, 'Assignment abandoned.')
+    else:
+        raise GameError('Choose accept or abort.')
+    slot.save()
+    return JsonResponse(serialize(slot, True))

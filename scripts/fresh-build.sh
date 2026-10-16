@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 echo 'Fresh development build: all accounts, saves, and game progress will be erased.'
 docker compose down
-docker compose build
+docker compose build --build-arg "NETRUNNER_BUILD_NONCE=$(date -u +%s)-$RANDOM"
 docker compose up -d --wait db
 docker compose run --rm --no-deps backend python backend/manage.py reset_dev --confirm ERASE-ALL-DATA
 docker compose up -d --no-build

@@ -95,6 +95,12 @@ async function closeApplication(application) {
 async function sendCommand(command, application) {
   return act(async () => { updateSlot(await api(`slots/${slot.value.id}/command/`, { command, application })); return true })
 }
+async function contractAction(action, job) {
+  await act(async () => {
+    updateSlot(await api(`slots/${slot.value.id}/contracts/`, { action, contract_id: job.id }))
+    notice.value = action === 'accept' ? `Contract ${job.id} reserved. Open your tools to begin.` : 'Contract aborted. Liability and reputation loss recorded.'
+  })
+}
 async function trade(action, productId) {
   await act(async () => { updateSlot(await api(`slots/${slot.value.id}/loadout/`, { action, product_id: productId })); notice.value = action === 'buy' ? 'Purchase complete. Hardware must be fitted; software is available in the application launcher.' : action === 'sell' ? 'Product sold. Payment recorded in your ledger.' : 'Component fitted.' })
 }
@@ -129,7 +135,7 @@ onUnmounted(() => { clearInterval(clock); clearInterval(poller) })
   <div class="app-shell">
     <aside class="sidebar">
       <a class="brand" href="#" @click.prevent="page = 'overview'" aria-label="Netrunner home"><span class="brand-icon"><Terminal :size="23" /></span><span>netrunner<span class="brand-dot">_</span><small>INDEPENDENT NETWORK ACCESS</small></span></a>
-      <div class="workspace-label">WORKSPACE <span>V.0.4</span></div>
+      <div class="workspace-label">WORKSPACE <span>V.0.5</span></div>
       <nav aria-label="Main navigation">
         <button v-for="item in nav" :key="item.id" :aria-label="item.label" :class="['nav-item', { active: page === item.id }]" @click="navigate(item)" :disabled="!slot || busy" :aria-current="page === item.id ? 'page' : undefined"><component :is="item.icon" :size="18" /><span>{{ item.label }}</span><span v-if="item.id === 'broker' && slot" class="nav-count">{{ slot.contracts.length }}</span><span v-if="item.id === 'terminal' && slot?.active_contract" class="live-dot"></span></button>
       </nav>
@@ -177,9 +183,9 @@ onUnmounted(() => { clearInterval(clock); clearInterval(poller) })
           <NetworkMap v-else-if="page === 'atlas'" :slot="slot" :busy="busy" @save="saveRoute" @directory="editDirectory" />
           <ExchangeView v-else-if="page === 'exchange'" :slot="slot" :busy="busy" @trade="trade" />
           <template v-else-if="page === 'broker'">
-            <div class="eyebrow">SERVICES / CONTRACT BROKER</div><div class="page-heading"><div><h1>Objectives. Nothing more<span>_</span></h1><p>Briefs disclose the target and desired result. Reservations and deliveries belong in your local shell.</p></div><span class="badge">{{ slot.rank_name.toUpperCase() }} ± 1</span></div>
+            <div class="eyebrow">SERVICES / CONTRACT BROKER</div><div class="page-heading"><div><h1>Objectives. Nothing more<span>_</span></h1><p>Briefs disclose the target and desired result. Reserve here or in your shell. Complete the work and deliver proof through your tools.</p></div><span class="badge">{{ slot.rank_name.toUpperCase() }} ± 1</span></div>
             <div class="broker-policy"><span>LOCAL TERMINAL: <code>accept &lt;contract-id&gt;</code></span><span>SUCCESS: +REPUTATION / PAYMENT / 5m REPLACEMENT</span><span>FAILURE: −60 REP / JOB-BASED FINE / 10m REPLACEMENT</span></div>
-            <div class="contract-grid"><article class="panel contract-card" v-for="job in slot.contracts" :key="job.id" :data-contract="job.id"><div class="contract-card-top"><span class="micro">CONTRACT {{ job.id }}</span><span class="badge">{{ slot.active_contract?.id === job.id ? 'RESERVED' : cooled(job) ? `SOURCING / ${cooldown(job)}s` : ranks[job.rank] }}</span></div><BriefcaseBusiness :size="25" class="contract-glyph" /><h2>{{ job.title }}</h2><span class="micro">{{ job.client.toUpperCase() }}</span><p>{{ job.description }}</p><dl class="job-details"><div><dt>CONTRACT ID</dt><dd class="contract-id">{{ job.id }}</dd></div><div><dt>TARGET</dt><dd>{{ job.target }}</dd></div><div><dt>ARTIFACT</dt><dd>{{ job.file }}</dd></div><div><dt>OBJECTIVE</dt><dd>{{ job.objective.toUpperCase() }}</dd></div><div><dt>SECURITY</dt><dd>CLASS {{ job.security }}</dd></div><div><dt>FAILURE LIABILITY</dt><dd>UP TO {{ 90 + job.rank * 80 }} CPH</dd></div></dl><div class="contract-card-bottom"><strong class="reward">{{ money(job.reward) }} <small>CPH</small></strong><span class="micro">+{{ job.reputation }} REPUTATION</span></div></article></div>
+            <div class="contract-grid"><article class="panel contract-card" v-for="job in slot.contracts" :key="job.id" :data-contract="job.id"><div class="contract-card-top"><span class="micro">CONTRACT {{ job.id }}</span><span class="badge">{{ slot.active_contract?.id === job.id ? 'RESERVED' : cooled(job) ? `SOURCING / ${cooldown(job)}s` : ranks[job.rank] }}</span></div><BriefcaseBusiness :size="25" class="contract-glyph" /><h2>{{ job.title }}</h2><span class="micro">{{ job.client.toUpperCase() }}</span><p>{{ job.description }}</p><dl class="job-details"><div><dt>CONTRACT ID</dt><dd class="contract-id">{{ job.id }}</dd></div><div><dt>TARGET</dt><dd>{{ job.target }}</dd></div><div><dt>ARTIFACT</dt><dd>{{ job.file }}</dd></div><div><dt>OBJECTIVE</dt><dd>{{ job.objective.toUpperCase() }}</dd></div><div><dt>SECURITY</dt><dd>CLASS {{ job.security }}</dd></div><div><dt>FAILURE LIABILITY</dt><dd>UP TO {{ 90 + job.rank * 80 }} CPH</dd></div></dl><div class="contract-card-bottom"><strong class="reward">{{ money(job.reward) }} <small>CPH</small></strong><span class="micro">+{{ job.reputation }} REPUTATION</span></div><button v-if="slot.active_contract?.id === job.id" class="button secondary" :disabled="busy" @click="contractAction('abort', job)">Abort · up to {{ 90 + job.rank * 80 }} CPH / −60 REP</button><button v-else class="button primary" :disabled="busy || !!slot.active_contract || cooled(job)" @click="contractAction('accept', job)">Accept contract {{ job.id }}</button></article></div>
           </template>
           <template v-else-if="page === 'console' && currentProcess">
             <div class="eyebrow">OPERATIONS / {{ activeConsole.toUpperCase() }}</div><div class="page-heading"><div><h1>{{ currentProcess.name }}<span>_</span></h1><p>{{ currentProcess.ram }} GB allocated. Commands execute inside this application's console.</p></div><span class="badge">{{ slot.connected ? 'REMOTE SESSION' : 'LOCAL SESSION' }}</span></div>

@@ -44,14 +44,21 @@ async function post(page, path, payload) {
   return response.json()
 }
 
+async function contractId(page, target = 'helix-0.internal') {
+  const slots = (await (await page.request.get('/api/slots/')).json()).slots
+  const slot = await (await page.request.get(`/api/slots/${slots[0].id}/`)).json()
+  return slot.contracts.find(job => job.target === target).id
+}
+
 test('manual tools, proxy route, terminal focus, delivery, equipment and three saves', async ({ page }) => {
   const handle = await register(page)
   await sidebar(page, 'Contract broker')
   await expect(page.locator('.contract-card')).toHaveCount(6)
-  await expect(page.locator('.contract-card button')).toHaveCount(0)
+  await expect(page.locator('.contract-card button')).toHaveCount(6)
+  const jobId = await contractId(page)
   await expect(page.getByText('NEXT COMMAND')).toHaveCount(0)
   await page.getByRole('button', { name: 'Terminal launcher', exact: true }).click()
-  await cmd(page, 'accept 0-0', 'Reservation confirmed: 0-0')
+  await cmd(page, `accept ${jobId}`, `Reservation confirmed: ${jobId}`)
   await expect(page.locator('.remote-status')).toHaveCount(0)
   await cmd(page, 'status', 'Remote: disconnected')
   const input = page.getByRole('textbox', { name: 'Terminal command', exact: true })
@@ -84,7 +91,7 @@ test('manual tools, proxy route, terminal focus, delivery, equipment and three s
   await cmd(page, 'submit', 'Delivery verified. +220 CPH')
   await page.screenshot({ path: '../.local/terminal-desktop.png', fullPage: true })
   await sidebar(page, 'Contract broker')
-  await expect(page.locator('[data-contract="0-0"]')).toContainText('SOURCING')
+  await expect(page.locator(`[data-contract="${jobId}"]`)).toContainText('SOURCING')
   await sidebar(page, 'Cipher bank')
   await cmd(page, 'balance', 'Available: 1,395 CPH')
   await expect(page.locator('.ledger-row')).toHaveCount(6)
@@ -162,7 +169,8 @@ test('bankrupt runner can explicitly restart one slot and preserve the other', a
     await post(page, `slots/${slotId}/loadout/`, { action: 'buy', product_id })
   }
   await post(page, `slots/${slotId}/applications/`, { action: 'launch', product_id: 'terminal' })
-  for (const id of ['0-0', '0-1', '0-2', '1-0']) {
+  const jobs = (await (await page.request.get(`/api/slots/${slotId}/`)).json()).contracts
+  for (const { id } of jobs.slice(0, 4)) {
     await post(page, `slots/${slotId}/command/`, { application: 'terminal', command: `accept ${id}` })
     await post(page, `slots/${slotId}/command/`, { application: 'terminal', command: 'abort' })
   }
@@ -246,7 +254,7 @@ test('sidebar services and persistent named-server directory on desktop and mobi
   await sidebar(page, 'Cipher bank')
   await expect(page.locator('.bank-hero h2')).toContainText('1,200')
   await page.getByRole('button', { name: 'Terminal launcher', exact: true }).click()
-  await cmd(page, 'accept 0-0', 'Reservation confirmed')
+  await cmd(page, `accept ${await contractId(page)}`, 'Reservation confirmed')
   await cmd(page, 'connect helix-0.internal', 'via 2 proxies')
   await sidebar(page, 'Atlas network')
   await page.getByRole('button', { name: 'Network directory', exact: false }).click()
@@ -262,10 +270,35 @@ test('fresh Ghost uses the displayed contract ID and gets accurate acceptance er
   await expect(cards).toHaveCount(6)
   await expect(page.locator('.broker-policy')).toContainText('accept <contract-id>')
   const contractId = await cards.first().locator('.contract-id').innerText()
-  expect(contractId).toBe('0-0')
+  expect(contractId).toMatch(/^\d{1,3}$/)
+  expect(Number(contractId)).toBeLessThanOrEqual(255)
   await page.getByRole('button', { name: 'Terminal launcher', exact: true }).click()
   await cmd(page, 'accept helix-0.internal', 'Unknown contract ID')
   await expect(page.getByRole('log')).not.toContainText('outside your rank')
-  await cmd(page, 'contracts', 'ID 0-0  [Ghost]')
-  await cmd(page, `accept ${contractId}`, 'Reservation confirmed: 0-0')
+  await cmd(page, 'contracts', `ID ${contractId}  [Ghost]`)
+  await cmd(page, `accept ${contractId}`, `Reservation confirmed: ${contractId}`)
+})
+
+
+test('broker buttons reserve and abort with penalties, cooldown and persistence', async ({ page }) => {
+  await register(page, 'Brokerbuttons')
+  await sidebar(page, 'Contract broker')
+  await page.setViewportSize({ width: 390, height: 844 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy()
+  const card = page.locator('.contract-card').first()
+  const id = await card.locator('.contract-id').innerText()
+  await card.getByRole('button', { name: `Accept contract ${id}`, exact: true }).click()
+  await expect(card).toContainText('RESERVED')
+  await expect(page.locator('.remote-status')).toHaveCount(0)
+  await expect(page.locator('.contract-card').nth(1).getByRole('button')).toBeDisabled()
+  await page.reload()
+  await sidebar(page, 'Contract broker')
+  await expect(card.locator('.contract-id')).toHaveText(id)
+  await card.getByRole('button', { name: 'Abort ·' }).click()
+  await expect(card).toContainText('SOURCING')
+  await expect(card.getByRole('button', { name: `Accept contract ${id}`, exact: true })).toBeDisabled()
+  await expect(page.locator('.contract-card').nth(1).getByRole('button')).toBeEnabled()
+  await sidebar(page, 'Cipher bank')
+  await expect(page.locator('.bank-hero h2')).toContainText('1,110')
+  await expect(page.locator('.ledger-row').first()).toContainText(`Contract failure // ${id}`)
 })

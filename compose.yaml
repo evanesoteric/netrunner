@@ -8,6 +8,7 @@ services:
       POSTGRES_PASSWORD: netrunner-local-only
     volumes:
       - ./.data/postgres:/var/lib/postgresql/data
+      - ./.data/backups:/backups
     healthcheck:
       test: [CMD-SHELL, 'pg_isready -h 127.0.0.1 -U netrunner -d netrunner']
       interval: 3s
@@ -23,12 +24,15 @@ services:
       PGUSER: netrunner
       PGPASSWORD: netrunner-local-only
       DJANGO_DEBUG: '1'
+      NETRUNNER_RESET_ON_BUILD: ${NETRUNNER_RESET_ON_BUILD:-1}
       DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,backend
       DJANGO_CSRF_TRUSTED_ORIGINS: http://localhost:${NETRUNNER_HTTP_PORT:-5173},http://127.0.0.1:${NETRUNNER_HTTP_PORT:-5173}
+    volumes:
+      - ./.data/build-state:/state
     depends_on:
       db:
         condition: service_healthy
-    command: [sh, -c, 'python backend/manage.py migrate --noinput && python backend/manage.py runserver 0.0.0.0:8000 --noreload']
+    command: [sh, -c, 'python backend/manage.py prepare_dev && python backend/manage.py runserver 0.0.0.0:8000 --noreload']
   frontend:
     build:
       context: .

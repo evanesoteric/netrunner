@@ -2,43 +2,74 @@
 
 A browser-based hacker game inspired by the atmosphere of Uplink. Django 5.2 and PostgreSQL 17 own the game state; Vue 3 and Vite power the interface. Hacking takes place entirely inside a fictional, simulated network.
 
-## v0.4 — local development data and fresh builds
+## v0.5 — broker controls, numeric IDs, and PostgreSQL lifecycle
 
-Contract reservation is terminal-driven. Open the top-bar **Terminal** launcher, then enter `accept 0-0` to reserve the displayed starter job. The broker also shows the generic `accept <contract-id>` syntax. Contract cards remain read-only.
+The broker now has **Accept** and **Abort** buttons. The terminal still accepts `accept <id>` and `abort`; all scanning, routing, remote work, cleanup, and delivery remain manual. Aborting applies the displayed liability, up to 60 reputation loss, and a ten-minute replacement cooldown. You can reserve one assignment per save.
 
-PostgreSQL runs in the database container. Its data now lives in **`.data/postgres/` inside your local `netrunner` directory**, mounted into the container. PostgreSQL uses a directory of binary files, not a single SQLite-style file. `.gitignore` and `.dockerignore` exclude `.data/` so accounts, saves, and database files are not committed or uploaded as image build context. Browser cookies and the last selected slot do not hold the game database.
+Contract IDs are randomly allocated, unique decimal numbers in the **8-bit range 0–255**. For example, a displayed ID of `173` is accepted with `accept 173`. Numbers are stored in PostgreSQL, survive restarts and dump/restore, and are allocated again for a fresh database. They do not encode rank. Private template keys preserve existing active missions and cooldowns when migrating a retained database.
 
-### Fresh development build (erases all accounts and progress)
+PostgreSQL 17 runs as a real server in the database container. Its binary data directory is **`.data/postgres/`**, inside your local checkout and bind-mounted into the container. Backups live in **`.data/backups/`**; build initialization state lives in **`.data/build-state/`**. All of `.data/` is excluded from Git and image build context. Browser storage holds no game database.
 
-After pulling the code, use the fresh-build command for each development cycle that should start empty. It stops the stack, builds the images, waits for PostgreSQL, clears accounts/saves/sessions/ledger data, and starts the app. It keeps the migrated schema.
+### Development builds erase the old database
 
-Windows PowerShell:
+```bash
+git pull --ff-only origin main
+docker compose up --build
+```
+
+A changed backend or frontend image fingerprint triggers **DROP DATABASE, CREATE DATABASE, and Django migrations** before the backend starts. This removes all accounts, saves, sessions, and game progress. It leaves backup archives intact. The first v0.5 startup also resets an existing development database. Ordinary container restarts preserve data. Rebuilding identical cached source keeps the same fingerprint and also preserves data.
+
+To force an empty database every cycle, even with unchanged source:
 
 ```powershell
 .\scripts\fresh-build.ps1
 ```
 
-Linux/macOS or Git Bash:
-
 ```bash
 bash scripts/fresh-build.sh
 ```
 
-Refresh the browser after startup and register a new account. Each run of these scripts intentionally removes **all accounts and all three save slots for every account** in this local development database.
+These scripts stop the stack, force a fresh build identity, drop/recreate the database, and restart. Refresh your browser and register again afterward.
 
-To clear the data without rebuilding, with the stack running:
+To explicitly reset without rebuilding, stop the backend first:
 
 ```bash
-docker compose exec backend python backend/manage.py reset_dev --confirm ERASE-ALL-DATA
+docker compose stop backend
+docker compose run --rm --no-deps backend python backend/manage.py reset_dev --confirm ERASE-ALL-DATA
+docker compose up -d --no-build
 ```
 
-The reset command refuses to run unless Django is in development mode. A normal `docker compose up --build` keeps the data in `.data/postgres/`; use the dedicated fresh-build command when you want an empty development database.
+Reset commands require `DJANGO_DEBUG=1` and refuse PostgreSQL maintenance databases. This is a local development policy. To retain progress across changed builds, set `NETRUNNER_RESET_ON_BUILD=0` in your root `.env` before starting Compose; migrations still run.
+
+### Export and import with PostgreSQL tools
+
+Create a consistent custom-format `pg_dump` archive without stopping the app:
+
+```powershell
+.\scripts\database.ps1 backup snapshot.dump
+```
+
+```bash
+bash scripts/database.sh backup snapshot.dump
+```
+
+The file is **`.data/backups/snapshot.dump`** on your computer. Omit the filename to generate a timestamped name. Existing archives are never overwritten. Copy these archives to another disk for durable backups; automatic backup scheduling is not implemented yet.
+
+Import an archive from `.data/backups/`, replacing the current database:
+
+```powershell
+.\scripts\database.ps1 restore snapshot.dump -Confirmation ERASE-ALL-DATA
+```
+
+```bash
+bash scripts/database.sh restore snapshot.dump ERASE-ALL-DATA
+```
+
+Restore checks the archive listing, stops the backend, drops/recreates the database, and runs `pg_restore --single-transaction --exit-on-error`. It migrates the restored schema and records the current image fingerprint before restarting, so startup keeps the imported data. If restoration fails, the backend stays stopped; the archive remains available to retry. Restore trusted archives only. These scripts run PostgreSQL tools inside the database container, avoiding PowerShell binary-output redirection problems. They preserve game state and IDs, but do not export cluster roles or PostgreSQL server configuration.
 
 ### Existing Docker volumes
 
-Before v0.4, PostgreSQL used the Docker-managed `netrunner-db` volume, which survives container rebuilds. Switching to the new folder starts a fresh database; old accounts are not copied into it. The old named volume is left intact as a recovery option and is no longer mounted. Back it up before updating if you want to keep any of those saves.
-
-`docker compose down -v` does **not** erase the new bind-mounted `.data/postgres/` directory. Use `reset_dev` or the fresh-build scripts to clear the active database. The native cloud workflow still uses its separate ignored `.local/pgdata` directory.
+Before v0.4, PostgreSQL used a Docker-managed `netrunner-db` volume. That unmounted volume is retained as a recovery option; it is not automatically imported. `docker compose down -v` does not erase the bind-mounted `.data/` directories. The native cloud workflow uses its separate ignored `.local/pgdata` directory and ordinary migration startup; use the explicit development reset command there when needed.
 
 ## v0.3 — sidebar services and server directory
 
@@ -59,16 +90,14 @@ Back up the database, pull `main`, and rebuild as shown below. Django applies th
 - **Custom machines:** 40 named hardware products across five tiers: two processors, gateways, memory modules, and drives per tier. Hardware purchases enter inventory and must be fitted. Spare components can be sold at half price.
 - **Specialized software:** 50 individual licenses: Cartograph network mappers, Lockpick authentication crackers, Rosetta decryptors, Ashfall log cleaners, and Tripwire trace monitors. Each has five capability classes and Pro/Micro variants. Micro trades speed for lower memory use. Purchased tools must be launched separately.
 - **World routing:** Atlas contains named fictional servers at 12 map locations. Select an ordered proxy chain, reorder/remove hops, and commit it. The route is drawn from your home gateway through the proxies to the reserved target. Pan and zoom the map or use the accessible saved-server list. Routes remain committed across sessions.
-- **Manual contracts:** reserve and submit assignments through the local shell. The broker publishes target, artifact, objective, clearance, and reward. There are retrieval, encrypted recovery, and deletion jobs at each rank.
+- **Manual contracts:** reserve with the broker or local shell, then submit through the shell. The broker publishes target, artifact, objective, clearance, and reward. There are retrieval, encrypted recovery, and deletion jobs at each rank.
 - **An economy with consequences:** routing leases and tool computation consume Cipher (CPH). Failed jobs cost up to `90 + 80 × job rank` CPH and 60 reputation (both balances floor at zero). Completed jobs return after five minutes; failed ones after ten, using server time. A bankrupt runner can sell spare equipment or explicitly restart that slot by typing their alias.
 
 Accounts retain three independent saves. Ranks are Ghost, Signal, Operator, Spectre, and Architect at 0, 100, 250, 450, and 700 reputation. Contracts are available at the runner's rank, one rank above, and one below. Products are purchasable through tier `min(5, rank + 2)`.
 
 ### Contract IDs and starter clearance
 
-A new Ghost runner can reserve Ghost and Signal assignments. Use the **full contract ID** (for example, `0-0`) from the broker's CONTRACT ID field or the shell's `contracts` listing. The command is `accept 0-0`; the target address, security class, and rank number are separate values.
-
-Unknown IDs now produce an explicit ID error; valid jobs outside your clearance report the job's rank and your allowed rank range. Copied IDs using typographic hyphens are accepted. The v0.3.1 regression checks verify all six starter broker entries can be reserved by a fresh Ghost runner.
+A new Ghost runner can reserve all six Ghost and Signal assignments, using **Accept** on the broker or `accept <id>` with the displayed numeric ID. Unknown IDs produce an explicit ID error; valid jobs outside your clearance report the actual job rank and your allowed range.
 
 ### Tool reference
 
@@ -90,20 +119,7 @@ Every mutation checks authentication, CSRF, save ownership, and current game sta
 
 ### Upgrade an existing installation
 
-Back up your database first. With the old Docker stack running:
-
-```bash
-docker compose exec -T db pg_dump -U netrunner netrunner > ../netrunner-before-v0.4.sql
-```
-
-Then pull and rebuild:
-
-```bash
-git pull --ff-only origin main
-docker compose up --build
-```
-
-Django automatically applies pending migrations, including `0002_runner_desktop` and `0003_atlas_server_directory`. Existing balances, reputation, completed contracts, saves, and ledger entries are preserved. Old hardware/gateway levels map to named components; old software levels map to appropriate tool licenses. An active v0.1 session is safely closed without a fine or reputation loss. Newly launched applications start from the desktop. Back up before rolling versions back: the old schema cannot represent the new loadout and process state.
+Export with the scripts above before rebuilding. Development builds intentionally reset progress by default. Set `NETRUNNER_RESET_ON_BUILD=0` before a rebuild to retain data and apply migrations, or restore your archive afterward. Migration `0004_contractidentity` assigns public numeric IDs without changing private mission keys. Existing balances, equipment, active missions, and cooldowns remain intact when using the preserve policy.
 
 ## Download and run on your computer
 
@@ -115,7 +131,7 @@ docker compose up --build
 
 When Django finishes migrations and Vite reports ready, open `http://localhost:5173` **on your own computer**. Register an account, then initialize a save slot. The first run downloads images and dependencies. The database is stored in the ignored `.data/postgres/` folder and survives stopping and restarting the application. Use the fresh-build scripts above for a clean development cycle.
 
-Stop with Ctrl+C, then `docker compose down`. Start again with `docker compose up`. To rebuild after code changes, use `docker compose up --build`. Use the fresh-build scripts or `reset_dev` to erase local game saves; `down -v` does not remove bind-mounted files.
+Stop with Ctrl+C, then `docker compose down`. Start again with `docker compose up`. To rebuild after code changes, use `docker compose up --build`. Changed builds reset the database; the fresh-build scripts force a reset even with cached source; `down -v` does not remove bind-mounted files.
 
 If port 5173 is busy, create a `.env` file next to `compose.yaml` containing `NETRUNNER_HTTP_PORT=5273`, then use port 5273 in your browser. The container setup is for local testing, with development-only database credentials and debug mode enabled.
 
@@ -125,7 +141,7 @@ Run the backend tests in Docker while the stack is running:
 docker compose exec backend python backend/manage.py test game --noinput
 ```
 
-The native cloud setup and application tests have been verified. The Compose configuration validates, but a complete container build could not be verified inside this cloud machine because its DNS/proxy trust configuration is not inherited by Docker builds.
+The native cloud setup and application tests have been verified. The Compose configuration validates, but a complete container build could not be verified inside this cloud machine because its DNS/proxy trust configuration is not inherited by Docker builds. PowerShell is not installed in this cloud workspace, so the PowerShell wrappers have not been executed here.
 
 ## Run in the cloud workspace
 
@@ -156,7 +172,7 @@ With `scripts/dev.sh` running:
 bash scripts/test.sh
 ```
 
-This runs the Django suite against a separate PostgreSQL test database, builds Vue, and runs Chromium browser tests. The database role needs permission to create the test database. Browser tests create accounts prefixed `e2e_` in the development database. They verify the manual tools-and-proxy contract loop, persistent cursor focus (including failed requests), bank charges, purchases/fitting/resale, three saves, sign-in persistence, confirmed bankruptcy recovery, and mobile layouts. Set `CHROMIUM_PATH` if Chromium is not at `/usr/bin/chromium`.
+This runs the Django suite against a separate PostgreSQL test database, builds Vue, and runs Chromium browser tests. The database role needs permission to create the test database and a disposable lifecycle database. The lifecycle check uses `pg_dump` and `pg_restore` from PATH or `NETRUNNER_PG_BIN`, and verifies actual drop/recreation, restart persistence, and an archive round trip. It is skipped if those client tools are unavailable. Browser tests create accounts prefixed `e2e_` in the development database. They verify the manual tools-and-proxy contract loop, persistent cursor focus (including failed requests), bank charges, purchases/fitting/resale, three saves, sign-in persistence, confirmed bankruptcy recovery, and mobile layouts. Set `CHROMIUM_PATH` if Chromium is not at `/usr/bin/chromium`.
 
 Backend-only checks:
 

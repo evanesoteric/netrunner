@@ -9,6 +9,7 @@ from .catalog import (
     PRODUCTS, RELAY_BY_ID, SOFTWARE, SUCCESS_COOLDOWN, HOME_NODE, RANKS,
 )
 from .models import LedgerEntry
+from .contracts import codes, public_code
 
 
 class GameError(Exception):
@@ -60,7 +61,7 @@ def fail(slot, reason):
         return
     fine = min(slot.balance, 90 + job['rank'] * 80)
     if fine:
-        transact(slot, -fine, f'Contract failure // {job["id"]}')
+        transact(slot, -fine, f'Contract failure // {public_code(job["id"])}')
     slot.reputation = max(0, slot.reputation - 60)
     slot.contract_cooldowns = {**slot.contract_cooldowns, job['id']: (timezone.now() + timedelta(seconds=FAILURE_COOLDOWN)).isoformat()}
     slot.active_contract = ''
@@ -159,7 +160,7 @@ def trade(slot, action, product_id):
 
 
 MANUALS = {
-    'terminal': 'LOCAL SHELL\nhelp — application manual\napps — running processes and RAM\ncontracts — broker listings\naccept <contract-id> — reserve by the full ID in contracts (example: accept 0-0)\nbrief — read the accepted brief\nroute — inspect the committed proxy chain\nconnect <host> — dial a fictional target\nstatus — gateway status\nls — remote file listing\nget <file> — copy a readable file to local storage\nrm <file> — remove a remote file\ndisconnect — end the remote session\nsubmit — deliver evidence to the broker\nabort — abandon the contract (fine and reputation loss)\nclear — clear local console output',
+    'terminal': 'LOCAL SHELL\nhelp — application manual\napps — running processes and RAM\ncontracts — broker listings\naccept <contract-id> — reserve by the numeric ID in contracts (0–255)\nbrief — read the accepted brief\nroute — inspect the committed proxy chain\nconnect <host> — dial a fictional target\nstatus — gateway status\nls — remote file listing\nget <file> — copy a readable file to local storage\nrm <file> — remove a remote file\ndisconnect — end the remote session\nsubmit — deliver evidence to the broker\nabort — abandon the contract (fine and reputation loss)\nclear — clear local console output',
     'mapper': 'CARTOGRAPH\nscan <host> — inspect a fictional host and its services\nCosts 1 + tool tier CPH. Scan quality depends on tool capability.',
     'cracker': 'LOCKPICK\ncrack <port> — attack a discovered authentication service\nRequires an active remote connection. Underpowered tools can fail.',
     'decryptor': 'ROSETTA\ndecrypt <file> — decode an encrypted remote archive\nRequires file access and a sufficient decryption engine.',
@@ -172,21 +173,21 @@ MANUALS = {
 def reserve(slot, contract_id):
     if slot.active_contract:
         raise GameError('An assignment is already reserved.')
-    # Copying an ID through formatted text can substitute a typographic dash.
-    contract_id = contract_id.translate(str.maketrans({char: '-' for char in '‐‑‒–—−'}))
-    job = CONTRACT_BY_ID.get(contract_id)
+    mapping = codes()
+    key = next((key for key, code in mapping.items() if str(code) == contract_id), None)
+    job = CONTRACT_BY_ID.get(key)
     if not job:
-        raise GameError(f'Unknown contract ID {contract_id!r}. Run contracts and use the full ID shown, such as 0-0. Target addresses and security classes are not contract IDs.')
+        raise GameError(f'Unknown contract ID {contract_id!r}. Run contracts and use its numeric ID (0–255).')
     if abs(job['rank'] - slot.rank) > 1:
         lower, upper = max(0, slot.rank - 1), min(len(RANKS) - 1, slot.rank + 1)
         raise GameError(f'Contract {contract_id} is outside your rank clearance: its rank is {RANKS[job["rank"]]}; your {RANKS[slot.rank]} clearance covers {RANKS[lower]} through {RANKS[upper]}.')
-    ready = available_at(slot, contract_id)
+    ready = available_at(slot, key)
     if ready and ready > timezone.now():
         raise GameError('The broker is still sourcing a replacement assignment. Check its availability time.')
-    slot.active_contract = contract_id
+    slot.active_contract = key
     slot.mission_state = {}
     slot.mission_started = None
-    return f'Reservation confirmed: {job["id"]}.\n{job["description"]}\nTarget: {job["target"]}. Payment: {job["reward"]} CPH.'
+    return f'Reservation confirmed: {public_code(job["id"])}.\n{job["description"]}\nTarget: {job["target"]}. Payment: {job["reward"]} CPH.'
 
 
 def _tool_work(slot, app, base):
@@ -295,7 +296,8 @@ def _shell(slot, verb, args, job):
     if verb == 'apps' and not args:
         return '\n'.join(f'{key}: {BUILTIN_APPS[value]["name"] if value in BUILTIN_APPS else SOFTWARE[value]["name"]}' for key, value in slot.running_apps.items()) + f'\nRAM: {ram_used(slot)} / {hardware(slot)["memory"]["ram"]} GB'
     if verb == 'contracts' and not args:
-        return '\n'.join(f'ID {c["id"]}  [{RANKS[c["rank"]]}]  {c["title"]}  {c["reward"]} CPH  {"cooling down" if available_at(slot, c["id"]) and available_at(slot, c["id"]) > timezone.now() else "available"}' for c in CONTRACTS if abs(c['rank'] - slot.rank) <= 1)
+        mapping = codes()
+        return '\n'.join(f'ID {mapping[c["id"]]}  [{RANKS[c["rank"]]}]  {c["title"]}  {c["reward"]} CPH  {"cooling down" if available_at(slot, c["id"]) and available_at(slot, c["id"]) > timezone.now() else "available"}' for c in CONTRACTS if abs(c['rank'] - slot.rank) <= 1)
     if verb == 'accept' and len(args) == 1:
         return reserve(slot, args[0])
     if verb == 'route' and not args:
@@ -305,7 +307,7 @@ def _shell(slot, verb, args, job):
     if not job:
         raise GameError('No reserved contract.')
     if verb == 'brief' and not args:
-        return f'{job["id"]} // {job["description"]}\nTarget: {job["target"]}. Reward: {job["reward"]} CPH.'
+        return f'{public_code(job["id"])} // {job["description"]}\nTarget: {job["target"]}. Reward: {job["reward"]} CPH.'
     if verb == 'abort' and not args:
         fail(slot, 'Assignment abandoned.')
         return 'Broker notified.'
@@ -327,7 +329,7 @@ def _shell(slot, verb, args, job):
         fulfilled = state.get('recovered') if job['objective'] == 'retrieve' else state.get('deleted')
         if not fulfilled or not state.get('clean_exit'):
             raise GameError('Broker rejected delivery: objective or clean exit evidence missing.')
-        transact(slot, job['reward'], f'Contract payment // {job["id"]}')
+        transact(slot, job['reward'], f'Contract payment // {public_code(job["id"])}')
         slot.reputation += job['reputation']
         slot.completed += 1
         slot.contract_cooldowns = {**slot.contract_cooldowns, job['id']: (timezone.now() + timedelta(seconds=SUCCESS_COOLDOWN)).isoformat()}

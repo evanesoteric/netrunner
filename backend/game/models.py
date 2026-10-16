@@ -53,3 +53,12 @@ class LedgerEntry(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     class Meta:
         ordering = ['-id']
+
+
+class ContractIdentity(models.Model):
+    # Template keys remain private so existing saves and cooldowns survive migration.
+    template_key = models.CharField(max_length=12, unique=True)
+    code = models.PositiveSmallIntegerField(unique=True)
+
+    class Meta:
+        constraints = [models.CheckConstraint(condition=Q(code__gte=0, code__lte=255), name='eight_bit_contract_code')]

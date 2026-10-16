@@ -10,7 +10,8 @@ from django.core.management import call_command, CommandError
 from django.db.migrations.recorder import MigrationRecorder
 from django.contrib.sessions.models import Session
 from django.utils import timezone
-from .models import SaveSlot
+from .contracts import public_code
+from .models import SaveSlot, ContractIdentity
 from .catalog import PRODUCTS, CONTRACT_BY_ID, RELAY_BY_ID, STARTER_EQUIPMENT
 
 
@@ -27,6 +28,8 @@ class APIHelpers:
         return self.post(self.endpoint('applications'), {'action': 'launch', 'product_id': product_id})
 
     def cmd(self, command, app='terminal'):
+        if command.startswith('accept ') and command[7:] in CONTRACT_BY_ID:
+            command = 'accept ' + public_code(command[7:])
         return self.post(self.endpoint('command'), {'application': app, 'command': command})
 
     def log_text(self, response):
@@ -138,27 +141,42 @@ class SimulationTests(APIHelpers, TestCase):
 
     def test_unknown_contract_id_is_not_reported_as_rank_denial(self):
         self.launch('terminal')
-        result = self.cmd('accept 0')
+        result = self.cmd('accept 256')
         self.assertIsNone(result['active_contract'])
         self.assertIn('Unknown contract ID', self.log_text(result))
         self.assertNotIn('outside your rank', self.log_text(result))
 
     def test_target_address_and_security_class_are_not_rank_failures(self):
         self.launch('terminal')
-        for value in ['helix-0.internal', '1', 'nonexistent']:
+        for value in ['helix-0.internal', '256', 'nonexistent']:
             with self.subTest(value=value):
                 result = self.cmd(f'accept {value}')
                 self.assertIsNone(result['active_contract'])
                 self.assertIn('Unknown contract ID', result['mission_log'][-1]['text'])
                 self.assertNotIn('rank clearance', result['mission_log'][-1]['text'])
 
-    def test_copied_contract_id_with_typographic_dash_is_accepted(self):
-        self.launch('terminal')
-        for dash in ['‐', '‑', '‒', '–', '—', '−']:
-            with self.subTest(dash=dash):
-                SaveSlot.objects.filter(pk=self.slot.pk).update(active_contract='', mission_state={})
-                result = self.cmd(f'accept 0{dash}0')
-                self.assertEqual(result['active_contract']['id'], '0-0')
+    def test_codes_are_unique_eight_bit_and_persist_between_reads(self):
+        first = self.refresh()['contracts']
+        self.assertEqual(first, self.refresh()['contracts'])
+        numbers = list(ContractIdentity.objects.values_list('code', flat=True))
+        self.assertEqual(len(numbers), 15)
+        self.assertEqual(len(set(numbers)), 15)
+        self.assertTrue(all(0 <= number <= 255 for number in numbers))
+        self.assertTrue(all(job['id'].isdigit() for job in first))
+
+    def test_broker_actions_validate_current_assignment_and_cooldown(self):
+        code = public_code('0-0')
+        response = self.post(self.endpoint('contracts'), {'action': 'accept', 'contract_id': code})
+        self.assertEqual(response['active_contract']['id'], code)
+        self.assertFalse(response['connected'])
+        self.post(self.endpoint('contracts'), {'action': 'accept', 'contract_id': code}, 400)
+        self.post(self.endpoint('contracts'), {'action': 'abort', 'contract_id': public_code('0-1')}, 400)
+        response = self.post(self.endpoint('contracts'), {'action': 'abort', 'contract_id': code})
+        self.assertIsNone(response['active_contract'])
+        self.assertEqual(response['balance'], 1110)
+        self.post(self.endpoint('contracts'), {'action': 'abort', 'contract_id': code}, 400)
+        self.post(self.endpoint('contracts'), {'action': 'accept', 'contract_id': code}, 400)
+        self.post(self.endpoint('contracts'), {'action': 'accept', 'contract_id': public_code('2-0')}, 400)
 
     def test_genuinely_ineligible_job_reports_actual_rank_and_clearance(self):
         self.launch('terminal')
@@ -170,7 +188,7 @@ class SimulationTests(APIHelpers, TestCase):
     def test_manual_reservation_does_not_connect_and_legacy_action_is_retired(self):
         self.post(self.endpoint('accept'), {'contract_id': '0-0'}, 410)
         response = self.reserve()
-        self.assertEqual(response['active_contract']['id'], '0-0')
+        self.assertEqual(response['active_contract']['id'], public_code('0-0'))
         self.assertFalse(response['connected'])
         self.assertEqual(response['balance'], 1200)
         self.assertNotIn('mission_step', response)
@@ -252,7 +270,7 @@ class SimulationTests(APIHelpers, TestCase):
         self.assertEqual(response['rank'], 1)
         self.assertEqual(response['completed'], 1)
         self.cmd('submit')
-        self.assertEqual(self.slot.ledger.filter(description='Contract payment // 0-0').count(), 1)
+        self.assertEqual(self.slot.ledger.filter(description=f'Contract payment // {public_code("0-0")}').count(), 1)
 
     def test_reading_after_cleaning_dirties_logs_and_fails_exit(self):
         self.gain_access()
@@ -339,7 +357,7 @@ class SimulationTests(APIHelpers, TestCase):
         self.assertIsNone(response['active_contract'])
         self.assertIn('still sourcing', self.log_text(response))
         SaveSlot.objects.filter(pk=self.slot.pk).update(contract_cooldowns={'0-0': (timezone.now() - timedelta(seconds=1)).isoformat()})
-        self.assertEqual(self.cmd('accept 0-0')['active_contract']['id'], '0-0')
+        self.assertEqual(self.cmd('accept 0-0')['active_contract']['id'], public_code('0-0'))
 
     def test_purchase_fit_sell_and_clearance(self):
         response = self.post(self.endpoint('loadout'), {'action': 'buy', 'product_id': 'gateway-1-specialist'})
@@ -588,14 +606,85 @@ class DevelopmentResetTests(TransactionTestCase):
         self.assertEqual(get_user_model().objects.count(), 1)
 
     @override_settings(DEBUG=True)
-    def test_reset_erases_accounts_progress_and_sessions_but_keeps_migrations(self):
-        migrations_before = MigrationRecorder.Migration.objects.count()
-        output = StringIO()
-        call_command('reset_dev', confirm='ERASE-ALL-DATA', stdout=output)
-        self.assertEqual(get_user_model().objects.count(), 0)
-        self.assertEqual(SaveSlot.objects.count(), 0)
-        self.assertEqual(Session.objects.count(), 0)
-        self.assertEqual(MigrationRecorder.Migration.objects.count(), migrations_before)
-        self.assertIn('Development database cleared', output.getvalue())
-        response = self.client.post('/api/register/', json.dumps({'username': 'reset-runner', 'password': 'Nebula!72-private-key'}), content_type='application/json')
-        self.assertEqual(response.status_code, 201, response.content)
+    def test_reset_recreates_and_migrates_instead_of_flushing(self):
+        from unittest.mock import patch
+        with patch('game.dev_database.recreate_database') as recreate, patch('game.dev_database.call_command') as migrate, patch('game.dev_database.remember_build'):
+            call_command('reset_dev', confirm='ERASE-ALL-DATA', stdout=StringIO())
+        recreate.assert_called_once()
+        self.assertEqual(migrate.call_args.args, ('migrate',))
+
+
+class DevelopmentDatabaseLifecycleTests(TestCase):
+    """Real DROP/CREATE and dump/restore, always in a disposable database."""
+
+    def test_build_reset_restart_and_dump_restore_round_trip(self):
+        import os
+        import shutil
+        import subprocess
+        import sys
+        import tempfile
+        import uuid
+        from pathlib import Path
+        import psycopg
+        from psycopg import sql
+
+        pg_bin = os.environ.get('NETRUNNER_PG_BIN', '')
+        dump = shutil.which('pg_dump') or str(Path(pg_bin) / 'pg_dump')
+        restore = shutil.which('pg_restore') or str(Path(pg_bin) / 'pg_restore')
+        if not Path(dump).is_file() or not Path(restore).is_file():
+            self.skipTest('pg_dump and pg_restore must be on PATH or in NETRUNNER_PG_BIN')
+        config = connection.settings_dict
+        params = {key: config[value] for key, value in {
+            'host': 'HOST', 'port': 'PORT', 'user': 'USER', 'password': 'PASSWORD',
+        }.items() if config.get(value)}
+        name = 'netrunner_lifecycle_' + uuid.uuid4().hex
+        env = {**os.environ, 'PGDATABASE': name, 'DJANGO_DEBUG': '1', 'NETRUNNER_RESET_ON_BUILD': '1'}
+        for key, value in {'PGHOST': 'HOST', 'PGPORT': 'PORT', 'PGUSER': 'USER', 'PGPASSWORD': 'PASSWORD'}.items():
+            env[key] = str(config.get(value, ''))
+        manage = Path(__file__).resolve().parents[1] / 'manage.py'
+
+        def run(*arguments):
+            result = subprocess.run(arguments, env=env, text=True, capture_output=True, timeout=45)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            return result.stdout
+
+        def query(statement):
+            with psycopg.connect(dbname=name, autocommit=True, **params) as db:
+                cursor = db.execute(statement)
+                return cursor.fetchall() if cursor.description else None
+
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                build = root / 'image-id'
+                build.write_text('build-one')
+                env.update(NETRUNNER_BUILD_ID_FILE=str(build), NETRUNNER_BUILD_STATE=str(root / 'state' / 'build-id'))
+                self.assertIn('dropping and recreating', run(sys.executable, str(manage), 'prepare_dev'))
+                run(sys.executable, str(manage), 'shell', '-c',
+                    "from django.contrib.auth import get_user_model; from game.models import SaveSlot; "
+                    "user = get_user_model().objects.create_user('lifecycle-runner'); "
+                    "slot = SaveSlot.objects.create(user=user, position=1, alias='Archive', balance=842, reputation=130, active_contract='0-1'); "
+                    "slot.ledger.create(amount=-90, description='Archive test receipt')")
+                identities = query('SELECT template_key, code FROM game_contractidentity ORDER BY template_key')
+                query('CREATE TABLE lifecycle_probe (value text)')
+                query("INSERT INTO lifecycle_probe VALUES ('backup survives')")
+                run(dump, '-d', name, '--format=custom', '--no-owner', '--no-acl', '--file=' + str(root / 'snapshot.dump'))
+                self.assertNotIn('dropping and recreating', run(sys.executable, str(manage), 'prepare_dev'))
+                self.assertEqual(query('SELECT * FROM lifecycle_probe'), [('backup survives',)])
+                build.write_text('build-two')
+                self.assertIn('dropping and recreating', run(sys.executable, str(manage), 'prepare_dev'))
+                self.assertEqual(query("SELECT to_regclass('lifecycle_probe')"), [(None,)])
+                # Prove the schema and migration history were recreated, not merely flushed.
+                self.assertEqual(query('SELECT count(*) FROM auth_user'), [(0,)])
+                self.assertEqual(query('SELECT count(*) FROM game_contractidentity'), [(15,)])
+                run(restore, '-d', name, '--clean', '--if-exists', '--no-owner', '--no-acl', '--exit-on-error', '--single-transaction', str(root / 'snapshot.dump'))
+                build.write_text('build-three')
+                run(sys.executable, str(manage), 'prepare_dev', '--preserve')
+                run(sys.executable, str(manage), 'prepare_dev')
+                self.assertEqual(query('SELECT * FROM lifecycle_probe'), [('backup survives',)])
+                self.assertEqual(query('SELECT template_key, code FROM game_contractidentity ORDER BY template_key'), identities)
+                self.assertEqual(query('SELECT alias, balance, reputation, active_contract FROM game_saveslot'), [('Archive', 842, 130, '0-1')])
+                self.assertEqual(query('SELECT amount, description FROM game_ledgerentry'), [(-90, 'Archive test receipt')])
+        finally:
+            with psycopg.connect(dbname='postgres', autocommit=True, **params) as maintenance:
+                maintenance.execute(sql.SQL('DROP DATABASE IF EXISTS {} WITH (FORCE)').format(sql.Identifier(name)))

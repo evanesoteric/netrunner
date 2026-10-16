@@ -46,6 +46,25 @@ Migration `0006` preserves known active mission state, deleted/decrypted artifac
 
 `generate_content` is a local Django management command, available only with `DJANGO_DEBUG=1`. It has no web endpoint and needs no external service. After the initial fresh build, PostgreSQL must be running and migrated; the backend web server may be stopped while you author content.
 
+Linux / Bash:
+
+```bash
+docker compose stop backend
+bash scripts/generate-content.sh missions --count 5 --rank 0
+bash scripts/generate-content.sh missions --count 2 --rank 1 --objective retrieve --encrypted
+bash scripts/generate-content.sh servers --count 5 --rank 0
+bash scripts/generate-content.sh servers --count 4 --rank 0 --exploitable
+docker compose up -d --no-build
+```
+
+On the native cloud setup:
+
+```bash
+source scripts/local-db.sh
+.venv/bin/python backend/manage.py generate_content missions --count 5 --rank 0
+.venv/bin/python backend/manage.py generate_content servers --count 4 --rank 0 --exploitable
+```
+
 PowerShell:
 
 ```powershell
@@ -55,14 +74,6 @@ docker compose stop backend
 .\scripts\generate-content.ps1 servers --count 5 --rank 0
 .\scripts\generate-content.ps1 servers --count 4 --rank 0 --exploitable
 docker compose up -d --no-build
-```
-
-Bash equivalents use `bash scripts/generate-content.sh` with the same arguments. On the native cloud setup:
-
-```bash
-source scripts/local-db.sh
-.venv/bin/python backend/manage.py generate_content missions --count 5 --rank 0
-.venv/bin/python backend/manage.py generate_content servers --count 4 --rank 0 --exploitable
 ```
 
 Ranks are 0 Ghost through 4 Architect. Each call creates unique server addresses and mission identities. Missions receive unused numbers from the existing 0–255 pool; a request exceeding remaining capacity fails without creating partial content. Use `--objective retrieve` or `--objective delete` for a specific mission type; `--encrypted` creates encrypted retrieval jobs. Omitting both chooses randomly. Generated proxy servers appear in Atlas's directory on the next refresh and can be bookmarked and routed through. `--exploitable` gives a server an amber opportunity marker and ransomware eligibility.
@@ -109,12 +120,16 @@ A changed backend or frontend image fingerprint triggers **DROP DATABASE, CREATE
 
 To force an empty database every cycle, even with unchanged source:
 
-```powershell
-.\scripts\fresh-build.ps1
-```
+Linux / Bash:
 
 ```bash
 bash scripts/fresh-build.sh
+```
+
+PowerShell:
+
+```powershell
+.\scripts\fresh-build.ps1
 ```
 
 These scripts stop the stack, force a fresh build identity, drop/recreate the database, and restart. Refresh your browser and register again afterward.
@@ -133,24 +148,32 @@ Reset commands require `DJANGO_DEBUG=1` and refuse PostgreSQL maintenance databa
 
 Create a consistent custom-format `pg_dump` archive without stopping the app:
 
-```powershell
-.\scripts\database.ps1 backup snapshot.dump
-```
+Linux / Bash:
 
 ```bash
 bash scripts/database.sh backup snapshot.dump
+```
+
+PowerShell:
+
+```powershell
+.\scripts\database.ps1 backup snapshot.dump
 ```
 
 The file is **`.data/backups/snapshot.dump`** on your computer. Omit the filename to generate a timestamped name. Existing archives are never overwritten. Copy these archives to another disk for durable backups; automatic backup scheduling is not implemented yet.
 
 Import an archive from `.data/backups/`, replacing the current database:
 
-```powershell
-.\scripts\database.ps1 restore snapshot.dump -Confirmation ERASE-ALL-DATA
-```
+Linux / Bash:
 
 ```bash
 bash scripts/database.sh restore snapshot.dump ERASE-ALL-DATA
+```
+
+PowerShell:
+
+```powershell
+.\scripts\database.ps1 restore snapshot.dump -Confirmation ERASE-ALL-DATA
 ```
 
 Restore checks the archive listing, stops the backend, drops/recreates the database, and runs `pg_restore --single-transaction --exit-on-error`. It migrates the restored schema and records the current image fingerprint before restarting, so startup keeps the imported data. If restoration fails, the backend stays stopped; the archive remains available to retry. Restore trusted archives only. These scripts run PostgreSQL tools inside the database container, avoiding PowerShell binary-output redirection problems. They preserve game state and IDs, but do not export cluster roles or PostgreSQL server configuration.
@@ -211,7 +234,7 @@ Export with the scripts above before rebuilding. Development builds intentionall
 
 ## Download and run on your computer
 
-Install Docker Desktop (Windows/macOS) or Docker Engine with Compose (Linux). Clone this repository, open a terminal in the `netrunner` directory, and run:
+Install Docker Engine with Compose (Linux) or Docker Desktop (Windows/macOS). Clone this repository, open a terminal in the `netrunner` directory, and run:
 
 ```bash
 docker compose up --build

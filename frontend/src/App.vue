@@ -129,7 +129,7 @@ onUnmounted(() => { clearInterval(clock); clearInterval(poller) })
   <div class="app-shell">
     <aside class="sidebar">
       <a class="brand" href="#" @click.prevent="page = 'overview'" aria-label="Netrunner home"><span class="brand-icon"><Terminal :size="23" /></span><span>netrunner<span class="brand-dot">_</span><small>INDEPENDENT NETWORK ACCESS</small></span></a>
-      <div class="workspace-label">WORKSPACE <span>V.0.3</span></div>
+      <div class="workspace-label">WORKSPACE <span>V.0.4</span></div>
       <nav aria-label="Main navigation">
         <button v-for="item in nav" :key="item.id" :aria-label="item.label" :class="['nav-item', { active: page === item.id }]" @click="navigate(item)" :disabled="!slot || busy" :aria-current="page === item.id ? 'page' : undefined"><component :is="item.icon" :size="18" /><span>{{ item.label }}</span><span v-if="item.id === 'broker' && slot" class="nav-count">{{ slot.contracts.length }}</span><span v-if="item.id === 'terminal' && slot?.active_contract" class="live-dot"></span></button>
       </nav>
@@ -178,7 +178,7 @@ onUnmounted(() => { clearInterval(clock); clearInterval(poller) })
           <ExchangeView v-else-if="page === 'exchange'" :slot="slot" :busy="busy" @trade="trade" />
           <template v-else-if="page === 'broker'">
             <div class="eyebrow">SERVICES / CONTRACT BROKER</div><div class="page-heading"><div><h1>Objectives. Nothing more<span>_</span></h1><p>Briefs disclose the target and desired result. Reservations and deliveries belong in your local shell.</p></div><span class="badge">{{ slot.rank_name.toUpperCase() }} ± 1</span></div>
-            <div class="broker-policy"><span>SUCCESS: +REPUTATION / PAYMENT / 5m REPLACEMENT</span><span>FAILURE: −60 REP / JOB-BASED FINE / 10m REPLACEMENT</span></div>
+            <div class="broker-policy"><span>LOCAL TERMINAL: <code>accept &lt;contract-id&gt;</code></span><span>SUCCESS: +REPUTATION / PAYMENT / 5m REPLACEMENT</span><span>FAILURE: −60 REP / JOB-BASED FINE / 10m REPLACEMENT</span></div>
             <div class="contract-grid"><article class="panel contract-card" v-for="job in slot.contracts" :key="job.id" :data-contract="job.id"><div class="contract-card-top"><span class="micro">CONTRACT {{ job.id }}</span><span class="badge">{{ slot.active_contract?.id === job.id ? 'RESERVED' : cooled(job) ? `SOURCING / ${cooldown(job)}s` : ranks[job.rank] }}</span></div><BriefcaseBusiness :size="25" class="contract-glyph" /><h2>{{ job.title }}</h2><span class="micro">{{ job.client.toUpperCase() }}</span><p>{{ job.description }}</p><dl class="job-details"><div><dt>CONTRACT ID</dt><dd class="contract-id">{{ job.id }}</dd></div><div><dt>TARGET</dt><dd>{{ job.target }}</dd></div><div><dt>ARTIFACT</dt><dd>{{ job.file }}</dd></div><div><dt>OBJECTIVE</dt><dd>{{ job.objective.toUpperCase() }}</dd></div><div><dt>SECURITY</dt><dd>CLASS {{ job.security }}</dd></div><div><dt>FAILURE LIABILITY</dt><dd>UP TO {{ 90 + job.rank * 80 }} CPH</dd></div></dl><div class="contract-card-bottom"><strong class="reward">{{ money(job.reward) }} <small>CPH</small></strong><span class="micro">+{{ job.reputation }} REPUTATION</span></div></article></div>
           </template>
           <template v-else-if="page === 'console' && currentProcess">

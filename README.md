@@ -2,6 +2,44 @@
 
 A browser-based hacker game inspired by the atmosphere of Uplink. Django 5.2 and PostgreSQL 17 own the game state; Vue 3 and Vite power the interface. Hacking takes place entirely inside a fictional, simulated network.
 
+## v0.4 — local development data and fresh builds
+
+Contract reservation is terminal-driven. Open the top-bar **Terminal** launcher, then enter `accept 0-0` to reserve the displayed starter job. The broker also shows the generic `accept <contract-id>` syntax. Contract cards remain read-only.
+
+PostgreSQL runs in the database container. Its data now lives in **`.data/postgres/` inside your local `netrunner` directory**, mounted into the container. PostgreSQL uses a directory of binary files, not a single SQLite-style file. `.gitignore` and `.dockerignore` exclude `.data/` so accounts, saves, and database files are not committed or uploaded as image build context. Browser cookies and the last selected slot do not hold the game database.
+
+### Fresh development build (erases all accounts and progress)
+
+After pulling the code, use the fresh-build command for each development cycle that should start empty. It stops the stack, builds the images, waits for PostgreSQL, clears accounts/saves/sessions/ledger data, and starts the app. It keeps the migrated schema.
+
+Windows PowerShell:
+
+```powershell
+.\scripts\fresh-build.ps1
+```
+
+Linux/macOS or Git Bash:
+
+```bash
+bash scripts/fresh-build.sh
+```
+
+Refresh the browser after startup and register a new account. Each run of these scripts intentionally removes **all accounts and all three save slots for every account** in this local development database.
+
+To clear the data without rebuilding, with the stack running:
+
+```bash
+docker compose exec backend python backend/manage.py reset_dev --confirm ERASE-ALL-DATA
+```
+
+The reset command refuses to run unless Django is in development mode. A normal `docker compose up --build` keeps the data in `.data/postgres/`; use the dedicated fresh-build command when you want an empty development database.
+
+### Existing Docker volumes
+
+Before v0.4, PostgreSQL used the Docker-managed `netrunner-db` volume, which survives container rebuilds. Switching to the new folder starts a fresh database; old accounts are not copied into it. The old named volume is left intact as a recovery option and is no longer mounted. Back it up before updating if you want to keep any of those saves.
+
+`docker compose down -v` does **not** erase the new bind-mounted `.data/postgres/` directory. Use `reset_dev` or the fresh-build scripts to clear the active database. The native cloud workflow still uses its separate ignored `.local/pgdata` directory.
+
 ## v0.3 — sidebar services and server directory
 
 Cipher bank, the contract broker, and Atlas are available directly from the left sidebar, including on mobile. These shortcuts launch/open the same applications and respect their existing RAM requirements.
@@ -55,7 +93,7 @@ Every mutation checks authentication, CSRF, save ownership, and current game sta
 Back up your database first. With the old Docker stack running:
 
 ```bash
-docker compose exec -T db pg_dump -U netrunner netrunner > ../netrunner-before-v0.3.sql
+docker compose exec -T db pg_dump -U netrunner netrunner > ../netrunner-before-v0.4.sql
 ```
 
 Then pull and rebuild:
@@ -69,15 +107,15 @@ Django automatically applies pending migrations, including `0002_runner_desktop`
 
 ## Download and run on your computer
 
-Install Docker Desktop (Windows/macOS) or Docker Engine with Compose (Linux). Extract the source ZIP, open a terminal in the extracted `netrunner` directory, and run:
+Install Docker Desktop (Windows/macOS) or Docker Engine with Compose (Linux). Clone this repository, open a terminal in the `netrunner` directory, and run:
 
 ```bash
 docker compose up --build
 ```
 
-When Django finishes migrations and Vite reports ready, open `http://localhost:5173` **on your own computer**. Register an account, then initialize a save slot. The first run downloads images and dependencies. The database is stored in a Docker volume and survives stopping and restarting the application.
+When Django finishes migrations and Vite reports ready, open `http://localhost:5173` **on your own computer**. Register an account, then initialize a save slot. The first run downloads images and dependencies. The database is stored in the ignored `.data/postgres/` folder and survives stopping and restarting the application. Use the fresh-build scripts above for a clean development cycle.
 
-Stop with Ctrl+C, then `docker compose down`. Start again with `docker compose up`. To rebuild after code changes, use `docker compose up --build`. Avoid `docker compose down -v` unless you intend to delete all local game saves.
+Stop with Ctrl+C, then `docker compose down`. Start again with `docker compose up`. To rebuild after code changes, use `docker compose up --build`. Use the fresh-build scripts or `reset_dev` to erase local game saves; `down -v` does not remove bind-mounted files.
 
 If port 5173 is busy, create a `.env` file next to `compose.yaml` containing `NETRUNNER_HTTP_PORT=5273`, then use port 5273 in your browser. The container setup is for local testing, with development-only database credentials and debug mode enabled.
 

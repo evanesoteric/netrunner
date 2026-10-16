@@ -260,6 +260,7 @@ test('fresh Ghost uses the displayed contract ID and gets accurate acceptance er
   await sidebar(page, 'Contract broker')
   const cards = page.locator('.contract-card')
   await expect(cards).toHaveCount(6)
+  await expect(page.locator('.broker-policy')).toContainText('accept <contract-id>')
   const contractId = await cards.first().locator('.contract-id').innerText()
   expect(contractId).toBe('0-0')
   await page.getByRole('button', { name: 'Terminal launcher', exact: true }).click()

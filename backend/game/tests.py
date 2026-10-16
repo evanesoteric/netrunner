@@ -1,10 +1,14 @@
 import json
+from io import StringIO
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction, close_old_connections, connection
 from django.db.migrations.executor import MigrationExecutor
-from django.test import TestCase, TransactionTestCase, Client
+from django.test import TestCase, TransactionTestCase, Client, override_settings
+from django.core.management import call_command, CommandError
+from django.db.migrations.recorder import MigrationRecorder
+from django.contrib.sessions.models import Session
 from django.utils import timezone
 from .models import SaveSlot
 from .catalog import PRODUCTS, CONTRACT_BY_ID, RELAY_BY_ID, STARTER_EQUIPMENT
@@ -560,3 +564,38 @@ class AtlasDirectoryMigrationTests(TransactionTestCase):
         finally:
             restore = MigrationExecutor(connection)
             restore.migrate(restore.loader.graph.leaf_nodes())
+
+
+class DevelopmentResetTests(TransactionTestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user('reset-runner', password='A-test-passphrase-42')
+        self.client.force_login(self.user)
+        self.slot = SaveSlot.objects.create(user=self.user, position=1, alias='Reset')
+        self.slot.ledger.create(amount=1200, description='Initial funding')
+
+    @override_settings(DEBUG=True)
+    def test_reset_requires_explicit_confirmation(self):
+        for confirmation in [None, 'yes', '']:
+            with self.subTest(confirmation=confirmation), self.assertRaises(CommandError):
+                call_command('reset_dev', confirm=confirmation, stdout=StringIO())
+        self.assertTrue(get_user_model().objects.filter(pk=self.user.pk).exists())
+        self.assertTrue(SaveSlot.objects.filter(pk=self.slot.pk).exists())
+
+    @override_settings(DEBUG=False)
+    def test_reset_is_refused_outside_development_mode(self):
+        with self.assertRaises(CommandError):
+            call_command('reset_dev', confirm='ERASE-ALL-DATA', stdout=StringIO())
+        self.assertEqual(get_user_model().objects.count(), 1)
+
+    @override_settings(DEBUG=True)
+    def test_reset_erases_accounts_progress_and_sessions_but_keeps_migrations(self):
+        migrations_before = MigrationRecorder.Migration.objects.count()
+        output = StringIO()
+        call_command('reset_dev', confirm='ERASE-ALL-DATA', stdout=output)
+        self.assertEqual(get_user_model().objects.count(), 0)
+        self.assertEqual(SaveSlot.objects.count(), 0)
+        self.assertEqual(Session.objects.count(), 0)
+        self.assertEqual(MigrationRecorder.Migration.objects.count(), migrations_before)
+        self.assertIn('Development database cleared', output.getvalue())
+        response = self.client.post('/api/register/', json.dumps({'username': 'reset-runner', 'password': 'Nebula!72-private-key'}), content_type='application/json')
+        self.assertEqual(response.status_code, 201, response.content)

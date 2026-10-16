@@ -2,6 +2,41 @@
 
 A browser-based hacker game inspired by the atmosphere of Uplink. Django 5.2 and PostgreSQL 17 own the game state; Vue 3 and Vite power the interface. Hacking takes place entirely inside a fictional, simulated network.
 
+![Netrunner Workspace with multiple tools arranged on one screen](docs/screenshots/Workspace.webp)
+
+<details>
+<summary>More screenshots — desktop, Atlas, contracts, bank, applications, and notes</summary>
+
+### Home
+
+![Netrunner home screen](docs/screenshots/Home.webp)
+
+### Desktop
+
+![Netrunner operator desktop](docs/screenshots/Desktop.webp)
+
+### Atlas
+
+![Atlas network routing map](docs/screenshots/Atlas.webp)
+
+### Contract broker
+
+![Contract broker assignments](docs/screenshots/Contracts.webp)
+
+### Cipher bank
+
+![Cipher bank account terminal](docs/screenshots/Bank.webp)
+
+### Applications
+
+![Netrunner application launcher](docs/screenshots/Applications.webp)
+
+### Field Notes
+
+![Field Notes editor](docs/screenshots/Notes.webp)
+
+</details>
+
 ## v0.8 — personal multi-tool Workspace
 
 The sidebar now includes a separate **Workspace**. All previous screens and launchers remain available. Start with four panels—local terminal, Atlas, Cartograph, and Lockpick—then use **Launch visible tools** to start the available applications without leaving the page. Every console has its own command field, history, output, and cursor focus. A command updates the same runner state across all panels.

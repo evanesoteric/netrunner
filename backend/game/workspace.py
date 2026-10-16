@@ -24,6 +24,8 @@ def validate_workspace(layout):
         if not isinstance(key, str) or not isinstance(product, str) or key in seen:
             raise ValidationError('Workspace panels must have unique application IDs.')
         seen.add(key)
+        if key == 'cleaner':
+            raise ValidationError('Logcleaner is a terminal extension, not a workspace panel.')
         if key in BUILTIN_APPS or key in services:
             valid = product == key
         else:

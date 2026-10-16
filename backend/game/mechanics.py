@@ -133,6 +133,8 @@ def launch(slot, product_id):
         app = SOFTWARE[product_id]['kind']
     else:
         raise GameError('This application is not installed.')
+    if app == 'cleaner':
+        raise GameError('Logcleaner is built into the local terminal. Run logcleaner there.')
     previous = dict(slot.running_apps)
     slot.running_apps = {**previous, app: product_id}
     if ram_used(slot) > hardware(slot)['memory']['ram']:
@@ -183,11 +185,11 @@ def trade(slot, action, product_id):
 
 
 MANUALS = {
-    'terminal': 'LOCAL SHELL\nhelp — application manual\nrumors — intercepted hidden-service invitation\njump <host> — use an installed Wraith backdoor\napps — running processes and RAM\ncontracts — broker listings\naccept <contract-id> — reserve by the numeric ID in contracts (0–255)\nbrief — read the accepted brief\nroute — inspect the committed proxy chain\nconnect <host> — dial a fictional target\nstatus — gateway status\nhistory — recent operator journal for this target\nls — remote file listing\nget <file> — copy a readable file to local storage\nrm <file> — remove a remote file\ndisconnect — end the remote session\nsubmit — deliver evidence to the broker\nabort — abandon the contract (fine and reputation loss)\nclear — clear local console output',
+    'terminal': 'LOCAL SHELL\nhelp — application manual\nrumors — intercepted hidden-service invitation\njump <host> — use an installed Wraith backdoor\napps — running processes and RAM\ncontracts — broker listings\naccept <contract-id> — reserve by the numeric ID in contracts (0–255)\nbrief — read the accepted brief\nroute — inspect the committed proxy chain\nconnect <host> — dial a fictional target\nlogcleaner [license-id] — erase remote logs with an owned Logcleaner license\nlockpick — open the server login dialog\nstatus — gateway status\nhistory — recent operator journal for this target\nls — remote file listing\nget <file> — copy a readable file to local storage\nrm <file> — remove a remote file\ndisconnect — end the remote session\nsubmit — deliver evidence to the broker\nabort — abandon the contract (fine and reputation loss)\nclear — clear local console output',
     'mapper': 'CARTOGRAPH\nscan <host> — inspect a fictional host and its services\nCosts 1 + tool tier CPH. Scan quality depends on tool capability.',
     'cracker': 'LOCKPICK\nOpen the graphical password breaker from Applications. Connect to a server login and scan its authentication service first.',
     'decryptor': 'ROSETTA\ndecrypt <file> — decode an encrypted remote archive\nRequires file access and a sufficient decryption engine.',
-    'cleaner': 'ASHFALL\nerase — remove remote access logs\nLater remote operations can leave new log entries.',
+    'cleaner': 'LOGCLEANER\nRun logcleaner from the local terminal with an owned license.',
     'monitor': 'TRIPWIRE\ntrace — inspect the active trace\nThe monitor must remain running to show a live countdown.',
     'rootkit': 'WRAITH // EPIC\ninstall — persist a backdoor on the currently mounted server. Clean initial logs before leaving.\nFuture jump <host> connections bypass proxies and logs.',
     'ransomware': 'ECLIPSE // EPIC\ndeploy <host> — install on the currently mounted amber non-contract server. Maximum 3 instances; payout after 120 seconds; each instance then removes itself.',
@@ -238,7 +240,9 @@ def execute(slot, app, raw):
     if not parts:
         return
     verb, args = parts[0].lower(), parts[1:]
-    log(slot, app, f'{slot.alias}@{app}:~$ {raw}')
+    remote = session_target(slot) if app == 'terminal' and slot.mission_started and slot.mission_state.get('access') else None
+    prompt = f'admin@{remote["target"]}' if remote else f'{slot.alias}@{app}'
+    log(slot, app, f'{prompt}:~$ {raw}')
     if verb == 'clear' and app == 'terminal':
         slot.mission_log = [entry for entry in slot.mission_log if entry.get('app') != app]
         return
@@ -275,7 +279,7 @@ def execute(slot, app, raw):
                 raise GameError('Use deploy <host> on an amber opportunity server.')
             result = deploy_ransomware(slot, args[0])
         else:
-            usages = {'mapper': ('scan', 1), 'cracker': ('crack', 1), 'decryptor': ('decrypt', 1), 'cleaner': ('erase', 0), 'monitor': ('trace', 0)}
+            usages = {'mapper': ('scan', 1), 'cracker': ('crack', 1), 'decryptor': ('decrypt', 1), 'monitor': ('trace', 0)}
             expected, count = usages[app]
             if verb != expected or len(args) != count:
                 raise GameError('Unknown command or arguments for this application. Read help for its manual.')
@@ -323,12 +327,6 @@ def execute(slot, app, raw):
                     state.update(decrypted=True, dirty=True)
                     record_action(slot, job, 'file_decrypted', f'{job["file"]} decrypted on the remote filesystem.', decrypt=True)
                     result = f'{job["file"]}: decrypted. Checksum intact.'
-                elif app == 'cleaner':
-                    if not state.get('access'):
-                        raise GameError('Permission denied: remote log partition locked.')
-                    state['dirty'] = False
-                    clear_remote_logs(slot, job)
-                    result = 'Remote access logs erased.'
     except GameError as exc:
         result = str(exc)
         if slot.mission_started:
@@ -340,8 +338,41 @@ def execute(slot, app, raw):
     settle(slot)
 
 
+def clean_logs(slot, license_id=None):
+    if not slot.mission_started or not slot.mission_state.get('access'):
+        raise GameError('Permission denied: log in before cleaning remote logs.')
+    choices = [SOFTWARE[key] for key in slot.installed_software if key in SOFTWARE and SOFTWARE[key]['kind'] == 'cleaner']
+    if license_id:
+        choices = [tool for tool in choices if tool['id'] == license_id]
+    if not choices:
+        raise GameError('An owned Logcleaner license is required. Buy one at the exchange.')
+    free_ram = hardware(slot)['memory']['ram'] - ram_used(slot)
+    choices = [tool for tool in choices if tool['ram'] <= free_ram]
+    if not choices:
+        raise GameError('Not enough free RAM for Logcleaner. Close a tool or choose a Micro license.')
+    tool = max(choices, key=lambda tool: (tool['power'], tool['speed']))
+    previous = slot.running_apps
+    try:
+        slot.running_apps = {**previous, 'cleaner': tool['id']}
+        charged, result = _tool_work(slot, 'cleaner', 14)
+    finally:
+        slot.running_apps = previous
+    if not charged:
+        raise GameError(result)
+    job = current_target(slot)
+    if tool['power'] < job['security']:
+        raise GameError(f'Logcleaner capability {tool["power"]} is insufficient for security class {job["security"]}.')
+    slot.mission_state['dirty'] = False
+    clear_remote_logs(slot, job)
+    return f'{tool["name"]}: Remote access logs erased.'
+
+
 def _shell(slot, verb, args, job):
     arity = {'history': 0, 'jump': 1, 'rumors': 0, 'apps': 0, 'contracts': 0, 'accept': 1, 'route': 0, 'status': 0, 'brief': 0, 'abort': 0, 'connect': 1, 'submit': 0, 'disconnect': 0, 'ls': 0, 'get': 1, 'rm': 1}
+    if verb == 'logcleaner':
+        if len(args) > 1:
+            raise GameError('Use logcleaner [license-id].')
+        return clean_logs(slot, args[0] if args else None)
     if verb not in arity or len(args) != arity[verb]:
         raise GameError('Unknown shell command or arguments. Read help for the shell manual.')
     state = slot.mission_state
@@ -403,6 +434,8 @@ def _shell(slot, verb, args, job):
         slot.mission_started = None
         from .passwords import cancel_break
         cancel_break(slot)
+        state.pop('password_ready', None)
+        state.pop('password_result', None)
         state.update(clean_exit=True, access=False, trace_started=None)
         slot.remote_host = {}
         return 'Remote link closed. No access signature found.'

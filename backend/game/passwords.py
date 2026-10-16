@@ -24,6 +24,8 @@ def start_break(slot, port=None):
     state = slot.mission_state
     if state.get('access'):
         raise GameError('Already logged in to this server.')
+    if state.get('password_result') == 'ready':
+        raise GameError('Password already decoded. Click Login to enter the system.')
     if state.get('password_break'):
         raise GameError('A password breaker is already running.')
     target = current_target(slot)
@@ -64,9 +66,24 @@ def settle_break(slot):
         state['password_result'] = 'failed'
         log(slot, 'cracker', f'Tool capability {tool["power"]} is insufficient for security class {target["security"]}. Operation failed.')
     else:
-        # Completion time, rather than the next poll, starts the trace.
-        state.update(access=True, dirty=True, trace_started=deadline.isoformat(), work=0, password_result='granted')
-        record_action(slot, target, 'access_granted', 'Authentication compromised; filesystem mounted.')
-        sync_remote_logs(slot)
-        log(slot, 'cracker', 'Authentication compromised. Remote filesystem mounted. Trace started.')
+        state['password_result'] = 'ready'
+        state['password_ready'] = dict(target=target['target'], port=target['port'], revision=target.get('server_revision', 1), connection=slot.mission_started.isoformat())
+        log(slot, 'cracker', 'Password decoded. Click Login to enter the system.')
     slot.save()
+
+
+def login_target(slot):
+    state = slot.mission_state
+    target = current_target(slot)
+    ready = state.get('password_ready')
+    if not slot.mission_started or not target or state.get('access'):
+        raise GameError('Connect to a server login first.')
+    expected = dict(target=target['target'], port=target['port'], revision=target.get('server_revision', 1), connection=slot.mission_started.isoformat())
+    if state.get('password_result') != 'ready' or ready != expected:
+        raise GameError('Decode this server password before logging in.')
+    # Login is explicit; time spent decoding or reviewing the form consumes no trace.
+    state.update(access=True, dirty=True, trace_started=timezone.now().isoformat(), work=0, password_result='granted')
+    state.pop('password_ready', None)
+    record_action(slot, target, 'access_granted', 'Administrator login accepted; filesystem mounted.')
+    sync_remote_logs(slot)
+    log(slot, 'terminal', f'Logged in as admin on {target["target"]}. Remote filesystem mounted. Trace started.')

@@ -2,18 +2,28 @@
 
 ## Graphical password breaker
 
-Connect to a server from the local terminal to see its secure login. Scan its authentication service with Cartograph, then use **Open password breaker** or launch Lockpick through Applications. Click **Break password** to start the rolling character sequence. Lockpick is a graphical application on its own and in Workspace.
+Connect to a server from the local terminal and scan its authentication service with Cartograph. **Open password breaker**, or type `lockpick` in the terminal, to open the server-login modal. Lockpick also remains available through Applications and Workspace.
 
-The server controls completion time. CPU speed, Lockpick speed, target security, and route latency affect duration. Starting an attempt charges the tool's compute fee once. Insufficient capability produces a failed attempt after the sequence; no filesystem access or trace is granted on failure. Cancel, disconnect, close Lockpick, or change Lockpick versions to stop an attempt; compute charges are not refunded. Hiding a Workspace panel keeps its process and attempt running.
+The login form uses **admin**. Click **Break password** to decode the password in its form field. After decoding, the field shows asterisks. Click **Login** to mount the filesystem and open the target's terminal; this starts the trace. **Exit** closes the modal without logging in. It leaves the connection and any running attempt intact. Closing the modal returns keyboard focus to the primary terminal.
 
-Successful completion automatically logs in, mounts the filesystem, records remote access, and starts the trace. Cracking time does not subtract from the new trace budget. Attempts survive page changes and reloads while the process runs. Completion and the subsequent trace continue by server time while away, so returning late can reveal an expired trace. Wraith backdoor links still bypass authentication and tracing.
+The server controls decoding time using CPU speed, Lockpick speed, target security, and route latency. Each attempt charges compute once. Insufficient capability fails after decoding. Cancel, disconnect, stop Lockpick, or switch its version to stop an unfinished attempt; charges are not refunded. Decoding survives page changes and reloads while its process runs. A decoded password waits for explicit Login without starting a trace. Wraith connections still bypass authentication and tracing.
+
+## Trace tracker
+
+A fixed floating bar keeps the target and trace status visible across pages. Before login it shows an inactive trace; Wraith links show suppressed logging. A running, sufficiently capable Tripwire reveals the countdown and progress meter. The bar turns red at 30 seconds remaining. Without a suitable monitor, it shows that the timer is unavailable rather than inventing a countdown.
+
+## Integrated Logcleaner
+
+Buy Logcleaner Pro or Micro licenses at the exchange. In the primary terminal, select an owned license and click **Clean logs**, or enter `logcleaner [license-id]`. Omitting the ID selects the strongest owned version that fits free RAM. Cleanup requires login, enough compute funds and temporary free RAM, and sufficient software capability. It leaves no separate process running. Subsequent remote work can dirty the logs again.
+
+Software purchases show a brief build animation and completion notice. This is a presentation of the completed purchase; skipping it does not refund or cancel the license.
 
 ## Operator desktop
 
 - **Persistent terminal focus:** Enter and button submissions keep the command input focused, including failed requests. Up/Down recalls command history. Output can still be selected, and Tab can leave the terminal.
 - **Independent launchers:** the top bar launches the local terminal; the sidebar opens Atlas, the broker, and Cipher bank; the application launcher also starts the exchange and each installed tool. Running processes use graphical interfaces or their own consoles and share your machine's RAM. Closing a window does not disconnect a remote session.
 - **Custom machines:** 40 named hardware products across five tiers: two processors, gateways, memory modules, and drives per tier. Hardware purchases enter inventory and must be fitted. Spare components can be sold at half price.
-- **Specialized software:** 50 individual licenses: Cartograph network mappers, Lockpick authentication crackers, Rosetta decryptors, Ashfall log cleaners, and Tripwire trace monitors. Each has five capability classes and Pro/Micro variants. Micro trades speed for lower memory use. Purchased tools must be launched separately.
+- **Specialized software:** 50 individual licenses: Cartograph network mappers, Lockpick authentication crackers, Rosetta decryptors, Logcleaner terminal extensions, and Tripwire trace monitors. Each has five capability classes and Pro/Micro variants. Micro trades speed for lower memory use. Applications launch separately; Logcleaner runs inside the primary terminal.
 - **World routing:** Atlas contains named fictional servers at 12 map locations. Select an ordered proxy chain, reorder/remove hops, and commit it. The route is drawn from your home gateway through the proxies to the reserved target. Pan and zoom the map or use the accessible saved-server list. Routes remain committed across sessions.
 - **Manual contracts:** reserve with the broker or local shell, then submit through the shell. The broker publishes target, artifact, objective, clearance, and reward. There are retrieval, encrypted recovery, and deletion jobs at each rank.
 - **An economy with consequences:** routing leases and tool computation consume Cipher (CPH). Failed jobs cost up to `90 + 80 × job rank` CPH and 60 reputation (both balances floor at zero). Completed jobs return after five minutes; failed ones after ten, using server time. A bankrupt runner can sell spare equipment or explicitly restart that slot by typing their alias.
@@ -30,11 +40,11 @@ Each console has its own `help` manual. Commands run entirely inside the game's 
 
 | Application | Commands / purpose |
 | --- | --- |
-| Local terminal | `apps`, `contracts`, `accept <id>`, `brief`, `route`, `connect <host>`, `status`, `ls`, `get <file>`, `rm <file>`, `disconnect`, `submit`, `abort`, `clear` |
+| Local terminal | `apps`, `contracts`, `accept <id>`, `brief`, `route`, `connect <host>`, `lockpick`, `logcleaner [license-id]`, `status`, `ls`, `get <file>`, `rm <file>`, `disconnect`, `submit`, `abort`, `clear` |
 | Cartograph | `scan <host>` discovers authentication ports and archive metadata |
 | Lockpick | Graphical password breaker: scan a server, connect to its login, then click **Break password** |
 | Rosetta | `decrypt <file>` operates on an accessible encrypted archive |
-| Ashfall | `erase` removes remote access logs; later remote operations leave new logs |
+| Logcleaner | `logcleaner [license-id]` in the local terminal removes remote access logs |
 | Tripwire | `trace` reads the live trace; keep a capable monitor running for the desktop countdown |
 | Cipher bank | `balance`, `history` display this save's independent account |
 
@@ -53,7 +63,7 @@ The hidden server is absent from a new runner's public directory. Enter `rumors`
 
 Purchase licenses at Null Exchange and launch them through Applications. Upgrade memory or close other tools if you exceed your RAM capacity. Each save has its own discovery state, licenses, backdoors, and operations.
 
-**Backdoors:** scan a contract target or directory server with Cartograph, connect from the local terminal, crack its discovered port with Lockpick, then run `install` in Wraith's console. Installation requires mounted filesystem access. Clean the initial intrusion logs with Ashfall before disconnecting. Backdoors persist after contract completion and sign-out.
+**Backdoors:** scan a contract target or directory server with Cartograph, connect from the local terminal, crack its discovered port with Lockpick, then run `install` in Wraith's console. Installation requires mounted filesystem access. Clean the initial intrusion logs with Logcleaner before disconnecting. Backdoors persist after contract completion and sign-out.
 
 **Backdoored Servers** appears only while the Wraith license is owned. Its Connect buttons launch/open your terminal and connect directly to the selected server. You can also use `jump <host>`. These later connections bypass the saved proxy chain and its lease, grant filesystem access, suppress remote access logs, and have no trace countdown. Your saved proxy route remains available for ordinary connections. A reserved contract still must match the server you visit, and objective evidence plus a clean disconnect and `submit` are still required for payment.
 

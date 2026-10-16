@@ -36,7 +36,7 @@ TOOL_KINDS = {
     'mapper': ('Network mapper', 'Cartograph', 'scan <host>', 100, 2),
     'cracker': ('Authentication cracker', 'Lockpick', 'Graphical password breaker', 160, 3),
     'decryptor': ('File decryptor', 'Rosetta', 'decrypt <file>', 180, 3),
-    'cleaner': ('Log cleaner', 'Ashfall', 'erase', 110, 2),
+    'cleaner': ('Terminal extension', 'Logcleaner', 'logcleaner', 110, 2),
     'monitor': ('Trace monitor', 'Tripwire', 'trace', 90, 2),
 }
 for kind, (label, family, usage, base, ram) in TOOL_KINDS.items():

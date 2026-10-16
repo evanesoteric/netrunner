@@ -68,6 +68,7 @@ def serialize(slot, detailed=False):
         'market_unlocked': slot.market_unlocked,
         'mission_log': slot.mission_log,
         'trace_remaining': remaining if 'monitor' in slot.running_apps else None,
+        'trace_budget': slot.mission_state.get('trace_budget') if remaining is not None else None,
         'server_time': timezone.now().isoformat(),
     }
     if detailed:
@@ -103,7 +104,7 @@ def serialize(slot, detailed=False):
 @ensure_csrf_cookie
 @api(['GET'], authenticated=False)
 def session(request):
-    return JsonResponse({'user': {'username': request.user.username} if request.user.is_authenticated else None, 'currency': CURRENCY, 'ranks': RANKS, 'version': '0.9.0', 'server_time': timezone.now().isoformat()})
+    return JsonResponse({'user': {'username': request.user.username} if request.user.is_authenticated else None, 'currency': CURRENCY, 'ranks': RANKS, 'version': '0.10.0', 'server_time': timezone.now().isoformat()})
 
 @api(['POST'], authenticated=False)
 def register(request):
@@ -184,7 +185,7 @@ def command(request, slot_id):
 @api(['POST'])
 @transaction.atomic
 def password_breaker(request, slot_id):
-    from .passwords import start_break, cancel_break
+    from .passwords import start_break, cancel_break, login_target
     slot = SaveSlot.objects.select_for_update().get(pk=slot_id, user=request.user)
     settle(slot)
     action = request.data.get('action')
@@ -192,8 +193,11 @@ def password_breaker(request, slot_id):
         start_break(slot)
     elif action == 'cancel':
         cancel_break(slot)
+    elif action == 'login':
+        launch(slot, 'terminal')
+        login_target(slot)
     else:
-        raise GameError('Choose start or cancel.')
+        raise GameError('Choose start, cancel, or login.')
     slot.save()
     return JsonResponse(serialize(slot, True))
 

@@ -72,6 +72,7 @@ def connect_target(slot, address, backdoor=False):
                  work=0, trace_started=None, scanned_host=address, latency=stats['latency'], access=False, dirty=False, clean_exit=False, scanned=bool(scanned) and state.get('scanned_revision', 1) == server.revision, logs_recorded=False)
     state.pop('password_break', None)
     state.pop('password_result', None)
+    state.pop('password_ready', None)
     return f'Dialing {address} via {stats["hops"]} proxies.\nLease paid: {stats["fee"]} CPH. Remote session established. Server login awaiting authentication.'
 
 

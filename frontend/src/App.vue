@@ -1,8 +1,11 @@
 <script setup>
-import { computed, ref, nextTick, onMounted, onUnmounted } from 'vue'
+import { computed, ref, nextTick, onMounted, onUnmounted, watch } from 'vue'
 import { Terminal, Network, BriefcaseBusiness, Cpu, Landmark, Layers3, ArrowUpRight, ArrowRight, ChevronRight, Radio, ShieldCheck, LogOut, Plus, X, Check, Globe, Fingerprint, Activity, Grid2X2, Play, LockKeyhole, NotebookPen } from 'lucide-vue-next'
 import WorkspaceView from './components/WorkspaceView.vue'
 import PasswordBreaker from './components/PasswordBreaker.vue'
+import ModalDialog from './components/ModalDialog.vue'
+import BuildSplash from './components/BuildSplash.vue'
+import TraceTracker from './components/TraceTracker.vue'
 import ServerLogin from './components/ServerLogin.vue'
 import BrokerView from './components/BrokerView.vue'
 import BackdoorsView from './components/BackdoorsView.vue'
@@ -14,6 +17,7 @@ import FieldNotes from './components/FieldNotes.vue'
 import ServerHistory from './components/ServerHistory.vue'
 import NetworkMap from './components/NetworkMap.vue'
 
+const loginDialog = ref(false), buildProduct = ref(null)
 const workspaceRef = ref(null)
 const user = ref(null), slot = ref(null), saves = ref([]), page = ref('overview'), loading = ref(true), busy = ref(false), error = ref(''), notice = ref('')
 const authMode = ref('register'), username = ref(''), password = ref(''), alias = ref(''), now = ref(Date.now()), selectedPosition = ref(1)
@@ -102,7 +106,7 @@ function activate(app) {
     if (process) workspaceRef.value?.showApp(process.product_id, true)
     return
   }
-  activeConsole.value = app; page.value = ({ atlas: 'atlas', broker: 'broker', market: 'exchange', bank: 'bank' }[app] || 'console') }
+  activeConsole.value = app; page.value = ({ atlas: 'atlas', broker: 'broker', market: 'exchange', bank: 'bank' }[app] || 'console'); nextTick(() => document.querySelector('input[aria-label$=" command"]')?.focus({ preventScroll: true })) }
 async function launchApplication(productId, stay = false, expectedSlot = null) {
   if (expectedSlot !== null && slot.value?.id !== expectedSlot) return false
   return act(async () => {
@@ -127,12 +131,23 @@ async function sendCommand(command, application) {
 }
 async function breakerAction(action, expectedSlot) {
   if (slot.value?.id !== expectedSlot) return false
-  return act(async () => { updateSlot(await api(`slots/${expectedSlot}/password-breaker/`, { action })); return true })
+  const success = await act(async () => { updateSlot(await api(`slots/${expectedSlot}/password-breaker/`, { action })); return true })
+  if (action === 'login') {
+    loginDialog.value = false
+    if (success) { activate('terminal'); await nextTick(); document.querySelector('input[aria-label$=" command"]')?.focus({ preventScroll: true }) }
+  }
+  return success
+}
+function closeLoginDialog() {
+  loginDialog.value = false
+  nextTick(() => document.querySelector('input[aria-label$=" command"]')?.focus({ preventScroll: true }))
 }
 async function openCracker() {
+  if (!slot.value?.connected) { error.value = 'Connect to a server before opening its login.'; return }
   const product = slot.value.running_apps.find(app => app.id === 'cracker')?.product_id || slot.value.installed_software.find(id => slot.value.catalog.some(item => item.id === id && item.kind === 'cracker'))
-  if (product) await launchApplication(product)
+  if (product && await launchApplication(product, true, slot.value.id)) loginDialog.value = true
 }
+watch(() => `${slot.value?.id}:${slot.value?.created_at}:${slot.value?.connected}`, () => { loginDialog.value = false })
 async function jumpBackdoor(target) {
   await act(async () => {
     updateSlot(await api(`slots/${slot.value.id}/backdoors/`, { target }))
@@ -146,7 +161,7 @@ async function contractAction(action, job) {
   })
 }
 async function trade(action, productId) {
-  await act(async () => { updateSlot(await api(`slots/${slot.value.id}/loadout/`, { action, product_id: productId })); notice.value = action === 'buy' ? 'Purchase complete. Hardware must be fitted; software is available in the application launcher.' : action === 'sell' ? 'Product sold. Payment recorded in your ledger.' : 'Component fitted.' })
+  await act(async () => { const product = [...slot.value.catalog, ...slot.value.black_market_catalog].find(item => item.id === productId); updateSlot(await api(`slots/${slot.value.id}/loadout/`, { action, product_id: productId })); if (action === 'buy' && product?.category === 'software') buildProduct.value = product; notice.value = action === 'buy' ? (product?.kind === 'cleaner' ? 'Logcleaner installed in the primary terminal.' : 'Purchase complete. Hardware must be fitted; software is available in Applications.') : action === 'sell' ? 'Product sold. Payment recorded in your ledger.' : 'Component fitted.' })
 }
 async function saveRoute(nodes) {
   await act(async () => { updateSlot(await api(`slots/${slot.value.id}/route/`, { nodes })); notice.value = 'Proxy chain committed. Connection leases are charged when dialing a target.' })
@@ -176,10 +191,10 @@ onUnmounted(() => { clearInterval(clock); clearInterval(poller) })
 </script>
 
 <template>
-  <div class="app-shell">
+  <div class="app-shell" :inert="loginDialog || !!buildProduct">
     <aside class="sidebar">
       <a class="brand" href="#" @click.prevent="page = 'overview'" aria-label="Netrunner home"><span class="brand-icon"><Terminal :size="23" /></span><span>netrunner<span class="brand-dot">_</span><small>INDEPENDENT NETWORK ACCESS</small></span></a>
-      <div class="workspace-label">WORKSPACE <span>V.0.9</span></div>
+      <div class="workspace-label">WORKSPACE <span>V.0.10</span></div>
       <nav aria-label="Main navigation">
         <button v-for="item in nav" :key="item.id" :aria-label="item.label" :class="['nav-item', { active: page === item.id }]" @click="navigate(item)" :disabled="!slot || busy" :aria-current="page === item.id ? 'page' : undefined"><component :is="item.icon" :size="18" /><span>{{ item.label }}</span><span v-if="item.id === 'broker' && slot" class="nav-count">{{ slot.contracts.length }}</span><span v-if="item.id === 'terminal' && slot?.active_contract" class="live-dot"></span></button>
       </nav>
@@ -214,7 +229,7 @@ onUnmounted(() => { clearInterval(clock); clearInterval(poller) })
         </template>
 
         <template v-else>
-          <div v-if="slot.connected" class="remote-status"><Radio :size="15" /><span>REMOTE LINK / {{ slot.remote_target }}</span><strong>{{ slot.stealth_session ? 'WRAITH / LOGGING SUPPRESSED' : !slot.authenticated ? 'LOGIN REQUIRED / TRACE INACTIVE' : remaining == null ? (slot.running_apps.some(app => app.id === 'monitor') ? 'TRACE UNRESOLVED' : 'TRACE MONITOR OFFLINE') : `TRACE ${remaining}s` }}</strong></div>
+          <TraceTracker :slot="slot" :remaining="remaining" />
           <div v-if="slot.running_apps.length" class="application-dock" aria-label="Running applications"><div v-for="app in slot.running_apps" :key="app.id" :class="{ selected: activeConsole === app.id && !['overview', 'launcher', 'workspace'].includes(page) }"><button @click="activate(app.id)"><span class="green-dot"></span>{{ app.name }}</button><button :aria-label="`Stop ${app.name}`" :disabled="busy" @click="closeApplication(app.id)"><X :size="12" /></button></div></div>
           <template v-if="page === 'overview'">
             <div class="eyebrow"><span class="live-dot"></span> PERSONAL DESKTOP / SLOT 0{{ slot.position }}</div>
@@ -232,7 +247,7 @@ onUnmounted(() => { clearInterval(clock); clearInterval(poller) })
             <div class="eyebrow">OPERATIONS / {{ activeConsole.toUpperCase() }}</div><div class="page-heading"><div><h1>{{ currentProcess.name }}<span>_</span></h1><p>{{ currentProcess.ram }} GB allocated. {{ activeConsole === 'cracker' ? 'Graphical password breaker.' : "Commands execute inside this application’s console." }}</p></div><span class="badge">{{ slot.connected ? 'REMOTE SESSION' : 'LOCAL SESSION' }}</span></div>
             <PasswordBreaker v-if="activeConsole === 'cracker'" :slot="slot" :busy="busy" :action="breakerAction" />
             <ServerLogin v-if="activeConsole === 'terminal'" :slot="slot" :busy="busy" @open-cracker="openCracker" />
-            <TerminalConsole v-if="activeConsole !== 'cracker'" :slot="slot" :application="activeConsole" :busy="busy" :send="sendCommand" />
+            <TerminalConsole v-if="activeConsole !== 'cracker'" :slot="slot" :application="activeConsole" :busy="busy" :send="sendCommand" @open-cracker="openCracker" />
           </template>
           <template v-else-if="page === 'blackmarket' && slot.market_unlocked">
             <BlackMarket :slot="slot" :busy="busy" @trade="trade" />
@@ -252,4 +267,6 @@ onUnmounted(() => { clearInterval(clock); clearInterval(poller) })
       </main>
     </div>
   </div>
+  <ModalDialog v-if="loginDialog && slot" title="Remote system login" :restore-focus="false" @close="closeLoginDialog"><PasswordBreaker :slot="slot" :busy="busy" :action="breakerAction" modal @exit="closeLoginDialog" /></ModalDialog>
+  <BuildSplash v-if="buildProduct" :product="buildProduct" @close="buildProduct = null" />
 </template>

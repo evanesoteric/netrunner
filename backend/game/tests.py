@@ -36,7 +36,10 @@ class APIHelpers:
             slot = SaveSlot.objects.get(pk=self.slot.pk)
             slot.mission_state['password_break']['finishes_at'] = timezone.now().isoformat()
             slot.save()
-            return self.refresh()
+            result = self.refresh()
+            if result.get('password_result') == 'ready':
+                return self.post(self.endpoint('password-breaker'), {'action': 'login'})
+            return result
         return response
 
     def log_text(self, response):
@@ -61,8 +64,7 @@ class APIHelpers:
         return self.cmd(f'crack {CONTRACT_BY_ID[job]["port"]}', 'cracker')
 
     def clean_exit(self):
-        self.launch('cleaner-1-standard')
-        self.cmd('erase', 'cleaner')
+        self.cmd('logcleaner')
         self.cmd('disconnect')
 
 
@@ -212,7 +214,7 @@ class SimulationTests(APIHelpers, TestCase):
     def test_ram_limits_process_close_and_tool_variants(self):
         self.slot.installed_software += ['decryptor-1-standard', 'monitor-1-compact']
         self.slot.save()
-        for product in ['terminal', 'mapper-1-standard', 'cracker-1-standard', 'cleaner-1-standard']:
+        for product in ['terminal', 'atlas', 'mapper-1-standard', 'cracker-1-standard']:
             self.launch(product)
         self.post(self.endpoint('applications'), {'action': 'launch', 'product_id': 'decryptor-1-standard'}, 400)
         self.post(self.endpoint('applications'), {'action': 'close', 'application': 'mapper'})
@@ -281,8 +283,7 @@ class SimulationTests(APIHelpers, TestCase):
 
     def test_reading_after_cleaning_dirties_logs_and_fails_exit(self):
         self.gain_access()
-        self.launch('cleaner-1-standard')
-        self.cmd('erase', 'cleaner')
+        self.cmd('logcleaner')
         self.cmd('ls')
         response = self.cmd('disconnect')
         self.assertIsNone(response['active_contract'])
@@ -295,11 +296,9 @@ class SimulationTests(APIHelpers, TestCase):
         self.assertIn('Archive encrypted', self.log_text(response))
         self.post(self.endpoint('applications'), {'action': 'close', 'application': 'mapper'})
         # End the session safely to buy a license; cracked files are preserved only in this game session.
-        self.launch('cleaner-1-standard')
-        self.cmd('erase', 'cleaner')
+        self.cmd('logcleaner')
         self.cmd('disconnect')
         self.post(self.endpoint('loadout'), {'action': 'buy', 'product_id': 'decryptor-1-standard'})
-        self.post(self.endpoint('applications'), {'action': 'close', 'application': 'cleaner'})
         self.launch('decryptor-1-standard')
         self.cmd('connect helix-1.internal')
         self.cmd('crack 443', 'cracker')
@@ -405,7 +404,7 @@ class SimulationTests(APIHelpers, TestCase):
         self.slot.owned_hardware.append('memory-2-standard')
         self.slot.installed_software.append('decryptor-1-standard')
         self.slot.save()
-        for product in ['terminal', 'mapper-1-standard', 'cracker-1-standard', 'cleaner-1-standard', 'decryptor-1-standard']:
+        for product in ['terminal', 'atlas', 'mapper-1-standard', 'cracker-1-standard', 'decryptor-1-standard']:
             self.launch(product)
         self.post(self.endpoint('loadout'), {'action': 'equip', 'product_id': 'memory-1-standard'}, 400)
         self.post(self.endpoint('applications'), {'action': 'close', 'application': 'decryptor'})
@@ -567,7 +566,9 @@ class ConcurrentEconomyTests(APIHelpers, TransactionTestCase):
         self.slot.save()
         self.assertEqual(self.parallel_post('command', {'application': 'terminal', 'command': 'status'}), [200, 200])
         self.slot.refresh_from_db()
-        self.assertTrue(self.slot.mission_state['access'])
+        self.assertEqual(self.slot.mission_state['password_result'], 'ready')
+        self.assertFalse(self.slot.mission_state['access'])
+        self.assertCountEqual(self.parallel_post('password-breaker', {'action': 'login'}), [200, 400])
         self.assertEqual(self.slot.server_states.get(address='helix-0.internal').events.filter(kind='access_granted').count(), 1)
 
     def test_concurrent_note_edits_cannot_silently_overwrite_each_other(self):
@@ -1326,6 +1327,11 @@ class PasswordBreakerTests(APIHelpers, TestCase):
         self.assertFalse(self.refresh()['authenticated'])
         self.assertFalse(next(app for app in result['running_apps'] if app['id'] == 'cracker')['console'])
         result = self.finish_at(7)
+        self.assertFalse(result['authenticated'])
+        self.assertFalse(result['trace_active'])
+        self.assertEqual(result['password_result'], 'ready')
+        self.assertIsNone(result['password_break'])
+        result = self.post(self.endpoint('password-breaker'), {'action': 'login'})
         self.assertTrue(result['authenticated'])
         self.assertTrue(result['trace_active'])
         self.assertIsNone(result['password_break'])
@@ -1341,12 +1347,18 @@ class PasswordBreakerTests(APIHelpers, TestCase):
         self.refresh()
         self.assertEqual(self.slot.server_states.get(address='helix-0.internal').events.filter(kind='access_granted').count(), 1)
 
-    def test_delayed_poll_uses_actual_completion_time_and_can_expire_trace(self):
+    def test_decoded_password_waits_for_explicit_login_without_trace(self):
+        self.post(self.endpoint('password-breaker'), {'action': 'login'}, 400)
         self.start()
         result = self.finish_at(500)
-        self.assertFalse(result['connected'])
-        self.assertIsNone(result['active_contract'])
-        self.assertIn('TRACE COMPLETE', self.log_text(result))
+        self.assertTrue(result['connected'])
+        self.assertFalse(result['authenticated'])
+        self.assertFalse(result['trace_active'])
+        self.assertEqual(result['password_result'], 'ready')
+        self.post(self.endpoint('password-breaker'), {'action': 'start'}, 400)
+        result = self.post(self.endpoint('password-breaker'), {'action': 'login'})
+        self.assertTrue(result['authenticated'])
+        self.assertTrue(result['trace_active'])
 
     def test_duplicate_start_does_not_charge_twice_or_restart(self):
         first = self.start()
@@ -1422,3 +1434,90 @@ class PasswordBreakerTests(APIHelpers, TestCase):
         self.assertLess(self.start()['password_break']['duration'], slow)
         result = self.launch('cracker-1-compact')
         self.assertIsNone(result['password_break'])
+
+
+class IntegratedLogcleanerTests(APIHelpers, TestCase):
+    def setUp(self):
+        user = get_user_model().objects.create_user('logcleaner')
+        self.client.force_login(user)
+        self.slot = SaveSlot.objects.create(user=user, position=1, alias='logcleaner')
+
+    def test_logcleaner_is_owned_software_but_not_a_standalone_process(self):
+        self.post(self.endpoint('applications'), {'action': 'launch', 'product_id': 'cleaner-1-standard'}, 400)
+        self.assertIn('cleaner-1-standard', self.refresh()['installed_software'])
+        self.assertTrue(PRODUCTS['cleaner-1-standard']['name'].startswith('Logcleaner'))
+
+    def test_cleanup_runs_inside_primary_terminal_and_uses_license_compute(self):
+        self.gain_access()
+        self.slot.refresh_from_db()
+        work = self.slot.mission_state['work']
+        result = self.cmd('logcleaner cleaner-1-standard')
+        self.assertIn('Remote access logs erased', result['mission_log'][-1]['text'])
+        self.assertEqual(result['mission_log'][-1]['app'], 'terminal')
+        self.assertNotIn('cleaner', [app['id'] for app in result['running_apps']])
+        self.slot.refresh_from_db()
+        self.assertFalse(self.slot.mission_state['dirty'])
+        self.assertGreater(self.slot.mission_state['work'], work)
+        self.assertFalse(self.slot.server_states.get(address='helix-0.internal').remote_logs)
+
+    def test_cleanup_requires_login_owned_license_funds_and_free_memory(self):
+        self.scan_and_connect()
+        self.assertIn('log in', self.cmd('logcleaner')['mission_log'][-1]['text'])
+        self.launch('cracker-1-standard')
+        self.cmd('crack 22', 'cracker')
+        self.assertIn('license is required', self.cmd('logcleaner cleaner-5-standard')['mission_log'][-1]['text'])
+        SaveSlot.objects.filter(pk=self.slot.pk).update(balance=0)
+        self.assertIn('Insufficient CPH', self.cmd('logcleaner')['mission_log'][-1]['text'])
+        self.slot.refresh_from_db()
+        self.slot.balance = 500
+        self.slot.running_apps['monitor'] = 'monitor-1-standard'
+        self.slot.running_apps['atlas'] = 'atlas'
+        self.slot.installed_software.append('monitor-1-standard')
+        self.slot.save()
+        self.assertIn('Not enough free RAM', self.cmd('logcleaner')['mission_log'][-1]['text'])
+        self.slot.refresh_from_db()
+        self.assertTrue(self.slot.mission_state['dirty'])
+        self.assertNotIn('cleaner', self.slot.running_apps)
+
+    def test_cleanup_capability_failure_retains_remote_logs(self):
+        self.gain_access()
+        self.slot.server_states.filter(address='helix-0.internal').update(security=2)
+        result = self.cmd('logcleaner')
+        self.assertIn('insufficient', result['mission_log'][-1]['text'])
+        self.assertTrue(self.slot.server_states.get(address='helix-0.internal').remote_logs)
+
+    def test_stale_decoded_password_cannot_login_to_a_changed_service(self):
+        self.scan_and_connect()
+        self.launch('cracker-1-standard')
+        self.post(self.endpoint('password-breaker'), {'action': 'start'})
+        self.slot.refresh_from_db()
+        self.slot.mission_state['password_break']['finishes_at'] = timezone.now().isoformat()
+        self.slot.save()
+        self.assertEqual(self.refresh()['password_result'], 'ready')
+        self.slot.server_states.filter(address='helix-0.internal').update(port=2222)
+        self.post(self.endpoint('password-breaker'), {'action': 'login'}, 400)
+        self.assertFalse(self.refresh()['authenticated'])
+
+
+class IntegratedLogcleanerMigrationTests(TransactionTestCase):
+    def test_migration_retires_process_and_panel_but_keeps_licenses_and_other_progress(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate([('game', '0007_saveslot_workspace_layout_and_more')])
+        try:
+            old = executor.loader.project_state([('game', '0007_saveslot_workspace_layout_and_more')]).apps
+            user = old.get_model('auth', 'User').objects.create(username='cleaner-veteran')
+            terminal = dict(id='terminal', product_id='terminal', x=0, y=0, w=6, h=5)
+            cleaner = dict(id='cleaner', product_id='cleaner-1-standard', x=6, y=0, w=6, h=5)
+            slot = old.get_model('game', 'SaveSlot').objects.create(user_id=user.pk, position=1, alias='Veteran', balance=7654, field_notes='Keep this notebook', installed_software=['cleaner-1-standard', 'cleaner-2-compact'], running_apps={'terminal':'terminal', 'cleaner':'cleaner-1-standard'}, workspace_layout=[terminal, cleaner], workspace_revision=7)
+            executor = MigrationExecutor(connection)
+            executor.migrate([('game', '0008_integrated_logcleaner')])
+            updated = SaveSlot.objects.get(pk=slot.pk)
+            self.assertEqual(updated.balance, 7654)
+            self.assertEqual(updated.field_notes, 'Keep this notebook')
+            self.assertEqual(updated.installed_software, ['cleaner-1-standard', 'cleaner-2-compact'])
+            self.assertEqual(updated.running_apps, {'terminal': 'terminal'})
+            self.assertEqual(updated.workspace_layout, [terminal])
+            self.assertEqual(updated.workspace_revision, 8)
+        finally:
+            restore = MigrationExecutor(connection)
+            restore.migrate(restore.loader.graph.leaf_nodes())

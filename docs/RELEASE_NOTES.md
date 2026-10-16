@@ -2,6 +2,10 @@
 
 Historical feature and migration notes. See the [README](../README.md) for the current project overview and [development guide](DEVELOPMENT.md) for setup and maintenance.
 
+## v0.10 — terminal workflow and trace tracker
+
+Added a fixed floating trace tracker, a terminal-launched login modal with admin credentials and decoding inside the password field, explicit Login after decoding, and a short software purchase build animation. Logcleaner replaces Ashfall as a licensed terminal extension. Migration `0008` retires cleaner processes and panels while retaining licenses, other panels, and save progress. See the [gameplay guide](GAMEPLAY.md).
+
 ## v0.9 — graphical password breaker
 
 Lockpick now opens as a graphical application with a rolling character decoder, timed progress, and cancellation. Connected servers present a login before filesystem access. The trace begins on successful authentication; the server controls attempt timing, charges, capability checks, and completion across reloads. Both standalone and Workspace views share the same process. See the [gameplay reference](GAMEPLAY.md#graphical-password-breaker).

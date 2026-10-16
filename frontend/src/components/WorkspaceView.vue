@@ -15,7 +15,7 @@ const props = defineProps({ slot: Object, username: String, busy: Boolean, api: 
 const emit = defineEmits(['route', 'directory', 'trade', 'contract', 'jump', 'open-cracker'])
 const canvas = ref(null), panels = ref([]), starter = ref([]), revision = ref(0), identity = ref(''), saved = ref('[]')
 const ready = ref(false), loading = ref(true), saving = ref(false), error = ref(''), conflict = ref(null), narrow = ref(false), drag = ref(null)
-const selected = ref('cleaner-1-standard'), tileErrors = ref({}), launching = ref(false), recovery = ref(true)
+const selected = ref('notes'), tileErrors = ref({}), launching = ref(false), recovery = ref(true)
 const signature = layout => JSON.stringify(layout.map(({ id, product_id, x, y, w, h }) => ({ id, product_id, x, y, w, h })))
 const dirty = computed(() => signature(panels.value) !== saved.value)
 const saveStatus = computed(() => loading.value ? 'Loading arrangement…' : conflict.value ? 'Layout conflict — arrangement retained' : saving.value ? 'Saving arrangement…' : error.value ? 'Layout save failed' : dirty.value ? 'Unsaved arrangement' : 'Layout saved')
@@ -25,7 +25,7 @@ const extras = computed(() => [
   ...(props.slot.installed_software.includes('rootkit-epic') ? [{ id: 'backdoors', name: 'Backdoored Servers' }] : []),
 ])
 const choices = computed(() => [...props.slot.builtins.map(app => ({ ...app, product_id: app.id })),
-  ...props.slot.catalog.filter(item => props.slot.installed_software.includes(item.id)).map(item => ({ ...item, product_id: item.id, id: item.kind })),
+  ...props.slot.catalog.filter(item => item.kind !== 'cleaner' && props.slot.installed_software.includes(item.id)).map(item => ({ ...item, product_id: item.id, id: item.kind })),
   ...extras.value.map(item => ({ ...item, product_id: item.id }))])
 const rows = computed(() => Math.max(6, ...panels.value.map(panel => panel.y + panel.h)))
 let timer, disposed = false, active = true, queued = null
@@ -213,7 +213,7 @@ defineExpose({ showApp })
         <PasswordBreaker v-if="panel.id === 'cracker' && process(panel)" :slot="slot" :busy="busy" :action="breakerAction" />
         <template v-else-if="process(panel)?.console">
         <ServerLogin v-if="panel.id === 'terminal'" :slot="slot" :busy="busy" @open-cracker="emit('open-cracker')" />
-        <TerminalConsole :slot="slot" :application="panel.id" :busy="busy" :send="send" embedded :autofocus="false" />
+        <TerminalConsole :slot="slot" :application="panel.id" :busy="busy" :send="send" @open-cracker="emit('open-cracker')" embedded :autofocus="false" />
         </template>
         <NetworkMap v-else-if="panel.id === 'atlas' && process(panel)" map-only :slot="slot" :busy="busy" @save="emit('route', $event)" @directory="(action, id) => emit('directory', action, id)" />
         <BrokerView v-else-if="panel.id === 'broker' && process(panel)" :slot="slot" :busy="busy" :now="now" :offset="offset" :ranks="ranks" @action="(action, job) => emit('contract', action, job)" />

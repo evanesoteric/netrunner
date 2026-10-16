@@ -700,7 +700,7 @@ class DevelopmentDatabaseLifecycleTests(TestCase):
                     "slot.market_unlocked=True; slot.installed_software += ['rootkit-epic', 'ransomware-epic']; slot.save()")
                 run(sys.executable, str(manage), 'shell', '-c',
                     "from game.models import SaveSlot; from game.world import get_server, target_for_server; from game.persistence import ensure_server, event; "
-                    "slot = SaveSlot.objects.get(alias='Archive'); slot.field_notes='Archive notebook: follow the old relay'; slot.notes_revision=2; slot.save(); "
+                    "slot = SaveSlot.objects.get(alias='Archive'); slot.field_notes='Archive notebook: follow the old relay'; slot.notes_revision=2; slot.workspace_layout=[dict(id='terminal', product_id='terminal', x=1, y=2, w=9, h=6)]; slot.workspace_revision=4; slot.save(); "
                     "server = ensure_server(slot, target_for_server(get_server('world-0'))); server.files[0]['present']=False; server.visits=3; server.save(); event(server, 'file_deleted', 'Archive proof retained')")
                 identities = query('SELECT template_key, code FROM game_contractidentity ORDER BY template_key')
                 query('CREATE TABLE lifecycle_probe (value text)')
@@ -725,6 +725,7 @@ class DevelopmentDatabaseLifecycleTests(TestCase):
                 self.assertEqual(query('SELECT count(*) FROM game_generatedmission'), [(1,)])
                 self.assertEqual(query('SELECT count(*) FROM game_directoryserver'), [(6,)])
                 self.assertEqual(query('SELECT field_notes, notes_revision FROM game_saveslot'), [('Archive notebook: follow the old relay', 2)])
+                self.assertEqual(query("SELECT workspace_revision, workspace_layout->0->>'x', workspace_layout->0->>'w' FROM game_saveslot"), [(4, '1', '9')])
                 self.assertEqual(query("SELECT address, visits, files->0->>'present' FROM game_serverstate"), [('vesper-dispatch.internal', 3, 'false')])
                 self.assertEqual(query("SELECT count(*) FROM game_serverevent WHERE kind='file_deleted'"), [(1,)])
                 self.assertEqual(query("SELECT backdoors->0->>'target', ransomware_ops->0->>'reward', market_unlocked FROM game_saveslot"), [('vesper-dispatch.internal', '800', True)])
@@ -1174,3 +1175,79 @@ class PersistentWorldMigrationTests(TransactionTestCase):
         finally:
             restore = MigrationExecutor(connection)
             restore.migrate(restore.loader.graph.leaf_nodes())
+
+
+class WorkspaceTests(APIHelpers, TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user('workspace-runner')
+        self.client.force_login(self.user)
+        self.slot = SaveSlot.objects.create(user=self.user, position=1, alias='Workspace')
+
+    def workspace(self):
+        return self.client.get(f'/api/{self.endpoint("workspace")}/').json()
+
+    def save_layout(self, layout, revision=0, identity=None, status=200):
+        return self.post(self.endpoint('workspace'), {'layout': layout, 'revision': revision, 'identity': identity or self.workspace()['identity']}, status)
+
+    def test_layout_persists_across_login_without_launching_or_charging_apps(self):
+        from .workspace import validate_workspace
+        initial = self.workspace()
+        self.assertEqual(len(initial['layout']), 4)
+        validate_workspace(initial['layout'])
+        custom = [dict(id='terminal', product_id='terminal', x=2, y=1, w=8, h=6), dict(id='notes', product_id='notes', x=0, y=8, w=6, h=5)]
+        self.assertEqual(self.save_layout(custom)['revision'], 1)
+        self.client.logout()
+        self.client.force_login(self.user)
+        self.assertEqual(self.workspace()['layout'], custom)
+        self.slot.refresh_from_db()
+        self.assertEqual(self.slot.running_apps, {})
+        self.assertEqual(self.slot.balance, 1200)
+        self.assertEqual(self.refresh()['workspace_layout'], custom)
+        other = SaveSlot.objects.create(user=self.user, position=2, alias='Other')
+        self.assertEqual(self.client.get(f'/api/slots/{other.pk}/workspace/').json()['layout'], initial['layout'])
+
+    def test_layout_rejects_overlap_invalid_coordinates_and_duplicate_panels(self):
+        import copy
+        base = self.workspace()['layout']
+        for field, value in [('x', -1), ('x', 12), ('w', 2), ('h', 19), ('y', 512), ('w', True), ('id', 'unknown'), ('product_id', 'rootkit-epic')]:
+            invalid = copy.deepcopy(base)
+            invalid[0][field] = value
+            self.save_layout(invalid, status=400)
+        self.save_layout([base[0], base[0]], status=400)
+        overlap = copy.deepcopy(base)
+        overlap[1]['x'] = 0
+        self.save_layout(overlap, status=400)
+        self.save_layout({}, status=400)
+        self.assertEqual(self.workspace()['layout'], base)
+
+    def test_layout_conflicts_and_identical_retries_cannot_overwrite_newer_arrangements(self):
+        layout = self.workspace()['layout'][:1]
+        self.save_layout(layout)
+        self.assertEqual(self.save_layout(layout, revision=0)['revision'], 1)
+        conflict = self.save_layout([], revision=0, status=409)
+        self.assertEqual(conflict['workspace']['layout'], layout)
+        self.assertEqual(self.workspace()['layout'], layout)
+        self.assertEqual(self.save_layout([], revision=1)['layout'], [])
+
+    def test_layout_preferences_do_not_bypass_license_or_ram_limits(self):
+        self.save_layout([dict(id='rootkit', product_id='rootkit-epic', x=0, y=0, w=6, h=5)])
+        self.post(self.endpoint('applications'), {'action': 'launch', 'product_id': 'rootkit-epic'}, 400)
+        self.slot.refresh_from_db()
+        self.assertNotIn('rootkit-epic', self.slot.installed_software)
+        self.assertEqual(self.slot.running_apps, {})
+
+    def test_workspace_auth_csrf_and_restart_identity(self):
+        initial = self.workspace()
+        self.save_layout([])
+        outsider = get_user_model().objects.create_user('workspace-outsider')
+        other = SaveSlot.objects.create(user=outsider, position=1, alias='Other')
+        self.assertEqual(self.client.get(f'/api/slots/{other.pk}/workspace/').status_code, 404)
+        self.post(f'slots/{other.pk}/workspace', {}, 404)
+        strict = Client(enforce_csrf_checks=True)
+        strict.force_login(self.user)
+        self.assertEqual(strict.post(f'/api/{self.endpoint("workspace")}/', '{}', content_type='application/json').status_code, 403)
+        self.post(self.endpoint('restart'), {'confirmation': 'Workspace'})
+        self.save_layout([], identity=initial['identity'], status=409)
+        self.assertEqual(self.workspace()['layout'], initial['layout'])
+        self.client.logout()
+        self.assertEqual(self.client.get(f'/api/{self.endpoint("workspace")}/').status_code, 401)

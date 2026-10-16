@@ -1,0 +1,13 @@
+<script setup>
+import { BriefcaseBusiness } from 'lucide-vue-next'
+const props = defineProps({ slot: Object, busy: Boolean, now: Number, offset: Number, ranks: Array })
+defineEmits(['action'])
+const money = value => new Intl.NumberFormat('en-US').format(value)
+const cooled = job => job.available_at && Date.parse(job.available_at) > props.now + props.offset
+const cooldown = job => Math.max(0, Math.ceil((Date.parse(job.available_at) - props.now - props.offset) / 1000))
+</script>
+<template>
+            <div class="eyebrow">SERVICES / CONTRACT BROKER</div><div class="page-heading"><div><h1>Objectives. Nothing more<span>_</span></h1><p>Briefs disclose the target and desired result. Reserve here or in your shell. Complete the work and deliver proof through your tools.</p></div><span class="badge">{{ slot.rank_name.toUpperCase() }} ± 1</span></div>
+            <div class="broker-policy"><span>LOCAL TERMINAL: <code>accept &lt;contract-id&gt;</code></span><span>SUCCESS: +REPUTATION / PAYMENT / 5m REPLACEMENT</span><span>FAILURE: −60 REP / JOB-BASED FINE / 10m REPLACEMENT</span></div>
+            <div class="contract-grid"><article class="panel contract-card" v-for="job in slot.contracts" :key="job.id" :data-contract="job.id"><div class="contract-card-top"><span class="micro">CONTRACT {{ job.id }}</span><span class="badge">{{ slot.active_contract?.id === job.id ? 'RESERVED' : cooled(job) ? `SOURCING / ${cooldown(job)}s` : ranks[job.rank] }}</span></div><BriefcaseBusiness :size="25" class="contract-glyph" /><h2>{{ job.title }}</h2><span class="micro">{{ job.client.toUpperCase() }}</span><p>{{ job.description }}</p><dl class="job-details"><div><dt>CONTRACT ID</dt><dd class="contract-id">{{ job.id }}</dd></div><div><dt>TARGET</dt><dd>{{ job.target }}</dd></div><div><dt>ARTIFACT</dt><dd>{{ job.file }}</dd></div><div><dt>OBJECTIVE</dt><dd>{{ job.objective.toUpperCase() }}</dd></div><div><dt>SECURITY</dt><dd>CLASS {{ job.security }}</dd></div><div><dt>FAILURE LIABILITY</dt><dd>UP TO {{ 90 + job.rank * 80 }} CPH</dd></div></dl><div class="contract-card-bottom"><strong class="reward">{{ money(job.reward) }} <small>CPH</small></strong><span class="micro">+{{ job.reputation }} REPUTATION</span></div><button v-if="slot.active_contract?.id === job.id" class="button secondary" :disabled="busy" @click="$emit('action', 'abort', job)">Abort · up to {{ 90 + job.rank * 80 }} CPH / −60 REP</button><button v-else class="button primary" :disabled="busy || !!slot.active_contract || cooled(job)" @click="$emit('action', 'accept', job)">Accept contract {{ job.id }}</button></article></div>
+</template>

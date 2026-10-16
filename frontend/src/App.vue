@@ -1,6 +1,9 @@
 <script setup>
-import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { computed, ref, nextTick, onMounted, onUnmounted } from 'vue'
 import { Terminal, Network, BriefcaseBusiness, Cpu, Landmark, Layers3, ArrowUpRight, ArrowRight, ChevronRight, Radio, ShieldCheck, LogOut, Plus, X, Check, Globe, Fingerprint, Activity, Grid2X2, Play, LockKeyhole, NotebookPen } from 'lucide-vue-next'
+import WorkspaceView from './components/WorkspaceView.vue'
+import BrokerView from './components/BrokerView.vue'
+import BackdoorsView from './components/BackdoorsView.vue'
 import TerminalConsole from './components/TerminalConsole.vue'
 import AppLauncher from './components/AppLauncher.vue'
 import ExchangeView from './components/ExchangeView.vue'
@@ -9,6 +12,7 @@ import FieldNotes from './components/FieldNotes.vue'
 import ServerHistory from './components/ServerHistory.vue'
 import NetworkMap from './components/NetworkMap.vue'
 
+const workspaceRef = ref(null)
 const user = ref(null), slot = ref(null), saves = ref([]), page = ref('overview'), loading = ref(true), busy = ref(false), error = ref(''), notice = ref('')
 const authMode = ref('register'), username = ref(''), password = ref(''), alias = ref(''), now = ref(Date.now()), selectedPosition = ref(1)
 const ranks = ref([]), currency = ref({ name: 'Cipher', symbol: 'CPH' }), activeConsole = ref('terminal')
@@ -16,6 +20,7 @@ const restartOpen = ref(false), restartConfirmation = ref(''), responseTime = re
 let clock, poller, revision = 0, polling = false, serverOffset = 0
 const nav = computed(() => [
   { id: 'overview', label: 'Desktop', icon: Network },
+  { id: 'workspace', label: 'Workspace', icon: Grid2X2 },
   { id: 'broker', label: 'Contract broker', icon: BriefcaseBusiness },
   { id: 'bank', label: 'Cipher bank', icon: Landmark },
   { id: 'atlas', label: 'Atlas network', icon: Globe },
@@ -89,17 +94,30 @@ async function navigate(item) {
     else await launchApplication(item.id)
   } else page.value = item.id
 }
-function activate(app) { activeConsole.value = app; page.value = ({ atlas: 'atlas', broker: 'broker', market: 'exchange', bank: 'bank' }[app] || 'console') }
-async function launchApplication(productId) {
-  await act(async () => {
+function activate(app) {
+  if (page.value === 'workspace') {
+    const process = slot.value.running_apps.find(process => process.id === app)
+    if (process) workspaceRef.value?.showApp(process.product_id, true)
+    return
+  }
+  activeConsole.value = app; page.value = ({ atlas: 'atlas', broker: 'broker', market: 'exchange', bank: 'bank' }[app] || 'console') }
+async function launchApplication(productId, stay = false, expectedSlot = null) {
+  if (expectedSlot !== null && slot.value?.id !== expectedSlot) return false
+  return act(async () => {
     const result = await api(`slots/${slot.value.id}/applications/`, { action: 'launch', product_id: productId })
-    updateSlot(result); activate(result.running_apps.find(app => app.product_id === productId).id)
+    updateSlot(result)
+    if (!stay) activate(result.running_apps.find(app => app.product_id === productId).id)
+    await nextTick()
+    if (page.value === 'workspace') workspaceRef.value?.showApp(productId)
+    return true
   })
 }
-async function closeApplication(application) {
-  await act(async () => {
+async function closeApplication(application, stay = false, expectedSlot = null) {
+  if (expectedSlot !== null && slot.value?.id !== expectedSlot) return false
+  return act(async () => {
     updateSlot(await api(`slots/${slot.value.id}/applications/`, { action: 'close', application }))
-    if (activeConsole.value === application) page.value = 'launcher'
+    if (!stay && page.value !== 'workspace' && activeConsole.value === application) page.value = 'launcher'
+    return true
   })
 }
 async function sendCommand(command, application) {
@@ -151,7 +169,7 @@ onUnmounted(() => { clearInterval(clock); clearInterval(poller) })
   <div class="app-shell">
     <aside class="sidebar">
       <a class="brand" href="#" @click.prevent="page = 'overview'" aria-label="Netrunner home"><span class="brand-icon"><Terminal :size="23" /></span><span>netrunner<span class="brand-dot">_</span><small>INDEPENDENT NETWORK ACCESS</small></span></a>
-      <div class="workspace-label">WORKSPACE <span>V.0.7</span></div>
+      <div class="workspace-label">WORKSPACE <span>V.0.8</span></div>
       <nav aria-label="Main navigation">
         <button v-for="item in nav" :key="item.id" :aria-label="item.label" :class="['nav-item', { active: page === item.id }]" @click="navigate(item)" :disabled="!slot || busy" :aria-current="page === item.id ? 'page' : undefined"><component :is="item.icon" :size="18" /><span>{{ item.label }}</span><span v-if="item.id === 'broker' && slot" class="nav-count">{{ slot.contracts.length }}</span><span v-if="item.id === 'terminal' && slot?.active_contract" class="live-dot"></span></button>
       </nav>
@@ -187,7 +205,7 @@ onUnmounted(() => { clearInterval(clock); clearInterval(poller) })
 
         <template v-else>
           <div v-if="slot.connected" class="remote-status"><Radio :size="15" /><span>REMOTE LINK / {{ slot.remote_target }}</span><strong>{{ slot.stealth_session ? 'WRAITH / LOGGING SUPPRESSED' : remaining == null ? (slot.running_apps.some(app => app.id === 'monitor') ? 'TRACE UNRESOLVED' : 'TRACE MONITOR OFFLINE') : `TRACE ${remaining}s` }}</strong></div>
-          <div v-if="slot.running_apps.length" class="application-dock" aria-label="Running applications"><div v-for="app in slot.running_apps" :key="app.id" :class="{ selected: activeConsole === app.id && !['overview', 'launcher'].includes(page) }"><button @click="activate(app.id)"><span class="green-dot"></span>{{ app.name }}</button><button :aria-label="`Stop ${app.name}`" :disabled="busy" @click="closeApplication(app.id)"><X :size="12" /></button></div></div>
+          <div v-if="slot.running_apps.length" class="application-dock" aria-label="Running applications"><div v-for="app in slot.running_apps" :key="app.id" :class="{ selected: activeConsole === app.id && !['overview', 'launcher', 'workspace'].includes(page) }"><button @click="activate(app.id)"><span class="green-dot"></span>{{ app.name }}</button><button :aria-label="`Stop ${app.name}`" :disabled="busy" @click="closeApplication(app.id)"><X :size="12" /></button></div></div>
           <template v-if="page === 'overview'">
             <div class="eyebrow"><span class="live-dot"></span> PERSONAL DESKTOP / SLOT 0{{ slot.position }}</div>
             <div class="page-heading"><div><h1>Welcome back, {{ slot.alias }}<span>_</span></h1><p>Your gateway is online. What you do with it is up to you.</p></div><button class="button secondary" @click="page = 'launcher'">Application launcher <Grid2X2 :size="16" /></button></div>
@@ -199,11 +217,7 @@ onUnmounted(() => { clearInterval(clock); clearInterval(poller) })
           <NetworkMap v-else-if="page === 'atlas'" :slot="slot" :busy="busy" @save="saveRoute" @directory="editDirectory" />
           <ServerHistory v-else-if="page === 'history'" :key="`${slot.id}:${slot.created_at}`" :slot-id="slot.id" :api="api" :remote-target="slot.remote_target" />
           <ExchangeView v-else-if="page === 'exchange'" :slot="slot" :busy="busy" @trade="trade" />
-          <template v-else-if="page === 'broker'">
-            <div class="eyebrow">SERVICES / CONTRACT BROKER</div><div class="page-heading"><div><h1>Objectives. Nothing more<span>_</span></h1><p>Briefs disclose the target and desired result. Reserve here or in your shell. Complete the work and deliver proof through your tools.</p></div><span class="badge">{{ slot.rank_name.toUpperCase() }} ± 1</span></div>
-            <div class="broker-policy"><span>LOCAL TERMINAL: <code>accept &lt;contract-id&gt;</code></span><span>SUCCESS: +REPUTATION / PAYMENT / 5m REPLACEMENT</span><span>FAILURE: −60 REP / JOB-BASED FINE / 10m REPLACEMENT</span></div>
-            <div class="contract-grid"><article class="panel contract-card" v-for="job in slot.contracts" :key="job.id" :data-contract="job.id"><div class="contract-card-top"><span class="micro">CONTRACT {{ job.id }}</span><span class="badge">{{ slot.active_contract?.id === job.id ? 'RESERVED' : cooled(job) ? `SOURCING / ${cooldown(job)}s` : ranks[job.rank] }}</span></div><BriefcaseBusiness :size="25" class="contract-glyph" /><h2>{{ job.title }}</h2><span class="micro">{{ job.client.toUpperCase() }}</span><p>{{ job.description }}</p><dl class="job-details"><div><dt>CONTRACT ID</dt><dd class="contract-id">{{ job.id }}</dd></div><div><dt>TARGET</dt><dd>{{ job.target }}</dd></div><div><dt>ARTIFACT</dt><dd>{{ job.file }}</dd></div><div><dt>OBJECTIVE</dt><dd>{{ job.objective.toUpperCase() }}</dd></div><div><dt>SECURITY</dt><dd>CLASS {{ job.security }}</dd></div><div><dt>FAILURE LIABILITY</dt><dd>UP TO {{ 90 + job.rank * 80 }} CPH</dd></div></dl><div class="contract-card-bottom"><strong class="reward">{{ money(job.reward) }} <small>CPH</small></strong><span class="micro">+{{ job.reputation }} REPUTATION</span></div><button v-if="slot.active_contract?.id === job.id" class="button secondary" :disabled="busy" @click="contractAction('abort', job)">Abort · up to {{ 90 + job.rank * 80 }} CPH / −60 REP</button><button v-else class="button primary" :disabled="busy || !!slot.active_contract || cooled(job)" @click="contractAction('accept', job)">Accept contract {{ job.id }}</button></article></div>
-          </template>
+          <BrokerView v-else-if="page === 'broker'" :slot="slot" :busy="busy" :now="now" :offset="serverOffset" :ranks="ranks" @action="contractAction" />
           <template v-else-if="page === 'console' && currentProcess">
             <div class="eyebrow">OPERATIONS / {{ activeConsole.toUpperCase() }}</div><div class="page-heading"><div><h1>{{ currentProcess.name }}<span>_</span></h1><p>{{ currentProcess.ram }} GB allocated. Commands execute inside this application's console.</p></div><span class="badge">{{ slot.connected ? 'REMOTE SESSION' : 'LOCAL SESSION' }}</span></div>
             <TerminalConsole :slot="slot" :application="activeConsole" :busy="busy" :send="sendCommand" />
@@ -211,19 +225,16 @@ onUnmounted(() => { clearInterval(clock); clearInterval(poller) })
           <template v-else-if="page === 'blackmarket' && slot.market_unlocked">
             <BlackMarket :slot="slot" :busy="busy" @trade="trade" />
           </template>
-          <template v-else-if="page === 'backdoors' && slot.installed_software.includes('rootkit-epic')">
-            <div class="eyebrow">WRAITH / PERSISTENT ACCESS</div><div class="page-heading"><div><h1>Backdoored Servers<span>_</span></h1><p>Direct connections. No proxy lease. Remote access logging suppressed.</p></div><span class="badge">{{ slot.backdoors.length }} PERSISTENT LINKS</span></div>
-            <div v-if="!slot.backdoors.length" class="empty-state">No backdoors installed. Mount a server filesystem, launch Wraith Rootkit, and run install. Clean the initial access logs before leaving.</div>
-            <div class="server-directory-grid"><article v-for="server in slot.backdoors" :key="server.target" class="panel directory-card"><span class="micro">WRAITH / ROOT ACCESS</span><h3>{{ server.name || server.title }}</h3><code>{{ server.target }}</code><p>Persistent link / no proxy chain required</p><button class="button primary" :disabled="busy || slot.connected || (slot.active_contract && slot.active_contract.target !== server.target)" @click="jumpBackdoor(server.target)">Connect to {{ server.target }}</button></article></div>
-          </template>
+          <BackdoorsView v-else-if="page === 'backdoors' && slot.installed_software.includes('rootkit-epic')" :slot="slot" :busy="busy" @connect="jumpBackdoor" />
           <template v-else-if="page === 'bank'">
             <div class="eyebrow">SERVICES / CIPHER BANK TERMINAL</div><div class="page-heading"><div><h1>Your money. Off the grid<span>_</span></h1><p>Every route, compute charge, trade, and contract payment has a receipt.</p></div><span class="badge"><LockKeyhole :size="12" /> PRIVATE LEDGER</span></div><section class="bank-hero"><div><span class="micro">CIPHER // CURRENT ACCOUNT</span><h2>{{ money(slot.balance) }} <span>CPH</span></h2><p>Available balance</p></div><div class="bank-account"><Landmark :size="32" :stroke-width="1" /><span>ACCOUNT HOLDER</span><strong>{{ slot.alias }}</strong><small>NR-{{ String(slot.id).padStart(8,'0') }} / SLOT 0{{ slot.position }}</small></div></section>
             <TerminalConsole :slot="slot" application="bank" :busy="busy" :send="sendCommand" />
             <section class="panel ledger bank-ledger"><div class="panel-title"><span><Activity :size="16" /> TRANSACTION HISTORY</span><span class="panel-meta">LATEST 30 ENTRIES</span></div><div class="ledger-row" v-for="entry in slot.ledger" :key="entry.id"><div><span class="transaction-icon"><ArrowUpRight :size="16" /></span><strong>{{ entry.description }}</strong></div><time>{{ new Date(entry.created_at).toISOString().slice(0,16).replace('T',' ') }}</time><strong :class="entry.amount > 0 ? 'positive' : 'negative'">{{ entry.amount > 0 ? '+' : '−' }}{{ money(Math.abs(entry.amount)) }} <small>CPH</small></strong></div></section>
           </template>
+          <KeepAlive><WorkspaceView v-if="page === 'workspace'" ref="workspaceRef" :key="`${user.username}:${slot.id}:${slot.created_at}`" :slot="slot" :username="user.username" :busy="busy" :api="api" :send="sendCommand" :launch="(product, id) => launchApplication(product, true, id)" :close="(app, id) => closeApplication(app, true, id)" :now="now" :offset="serverOffset" :ranks="ranks" @route="saveRoute" @directory="editDirectory" @trade="trade" @contract="contractAction" @jump="jumpBackdoor" /></KeepAlive>
           <KeepAlive><FieldNotes v-if="page === 'notes'" :key="`${user.username}:${slot.id}:${slot.created_at}`" :slot-id="slot.id" :username="user.username" :api="api" /></KeepAlive>
           <section v-if="slot.ransomware_ops.length" class="panel ransomware-panel"><div class="panel-title"><span>ECLIPSE / ACTIVE INSTANCES</span><span class="panel-meta">{{ slot.ransomware_ops.length }} / 3</span></div><div v-for="operation in slot.ransomware_ops" :key="operation.target" class="ransomware-row"><code>{{ operation.target }}</code><span>{{ Math.max(0, Math.ceil((Date.parse(operation.due_at) - now - serverOffset) / 1000)) }}s</span><strong>{{ operation.reward }} CPH</strong></div></section>
-          <div v-if="restartOpen" class="modal-backdrop" @click.self="restartOpen = false"><section class="panel restart-dialog" role="dialog" aria-modal="true" aria-labelledby="restart-title"><div class="panel-title"><span>RUNNER RESTART</span><button class="icon-button" @click="restartOpen = false" aria-label="Cancel restart"><X :size="17" /></button></div><form @submit.prevent="restartRunner"><h2 id="restart-title">Start over in slot 0{{ slot.position }}?</h2><p>This erases {{ slot.alias }}'s balance, reputation, contracts, equipment, routes, notes, server histories, and transaction history. Your account and other save slots stay intact.</p><label for="restart-confirmation">TYPE {{ slot.alias }} TO CONFIRM</label><input id="restart-confirmation" v-model="restartConfirmation" autocomplete="off" required /><div class="dialog-actions"><button type="button" class="button secondary" @click="restartOpen = false">Cancel</button><button class="button primary" :disabled="busy || restartConfirmation !== slot.alias">Erase progress and restart</button></div></form></section></div>
+          <div v-if="restartOpen" class="modal-backdrop" @click.self="restartOpen = false"><section class="panel restart-dialog" role="dialog" aria-modal="true" aria-labelledby="restart-title"><div class="panel-title"><span>RUNNER RESTART</span><button class="icon-button" @click="restartOpen = false" aria-label="Cancel restart"><X :size="17" /></button></div><form @submit.prevent="restartRunner"><h2 id="restart-title">Start over in slot 0{{ slot.position }}?</h2><p>This erases {{ slot.alias }}'s balance, reputation, contracts, equipment, routes, notes, server histories, workspace arrangement, and transaction history. Your account and other save slots stay intact.</p><label for="restart-confirmation">TYPE {{ slot.alias }} TO CONFIRM</label><input id="restart-confirmation" v-model="restartConfirmation" autocomplete="off" required /><div class="dialog-actions"><button type="button" class="button secondary" @click="restartOpen = false">Cancel</button><button class="button primary" :disabled="busy || restartConfirmation !== slot.alias">Erase progress and restart</button></div></form></section></div>
         </template>
         <footer><span>NETRUNNER <span class="footer-slash">/</span> A WORLD BEHIND THE FIREWALL</span><span>FICTIONAL NETWORK. INDEPENDENT OPERATORS.<span class="green-dot"></span></span></footer>
       </main>

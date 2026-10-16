@@ -14,6 +14,7 @@ urlpatterns = [
     path('api/slots/<int:slot_id>/route/', views.route),
     path('api/slots/<int:slot_id>/directory/', views.directory),
     path('api/slots/<int:slot_id>/restart/', views.restart),
+    path('api/slots/<int:slot_id>/workspace/', views.workspace),
     path('api/slots/<int:slot_id>/notes/', views.field_notes),
     path('api/slots/<int:slot_id>/history/', views.server_history),
     path('api/slots/<int:slot_id>/backdoors/', views.backdoor_connect),

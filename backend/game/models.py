@@ -2,6 +2,7 @@ from django.conf import settings
 from django.db import models
 from django.db.models import Q
 from django.utils import timezone
+from .workspace import default_workspace
 from .catalog import rank_for, STARTER_EQUIPMENT, STARTER_SOFTWARE, STARTER_ATLAS_NODES
 
 
@@ -43,6 +44,8 @@ class SaveSlot(models.Model):
     ransomware_ops = models.JSONField(default=list)
     remote_host = models.JSONField(default=dict)
     market_unlocked = models.BooleanField(default=False)
+    workspace_layout = models.JSONField(default=default_workspace)
+    workspace_revision = models.PositiveIntegerField(default=0)
     field_notes = models.TextField(blank=True, default='')
     notes_revision = models.PositiveIntegerField(default=0)
     notes_updated_at = models.DateTimeField(null=True, blank=True)

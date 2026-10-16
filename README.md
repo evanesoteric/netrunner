@@ -2,6 +2,20 @@
 
 A browser-based hacker game inspired by the atmosphere of Uplink. Django 5.2 and PostgreSQL 17 own the game state; Vue 3 and Vite power the interface. Hacking takes place entirely inside a fictional, simulated network.
 
+## v0.8 — personal multi-tool Workspace
+
+The sidebar now includes a separate **Workspace**. All previous screens and launchers remain available. Start with four panels—local terminal, Atlas, Cartograph, and Lockpick—then use **Launch visible tools** to start the available applications without leaving the page. Every console has its own command field, history, output, and cursor focus. A command updates the same runner state across all panels.
+
+Use **Add a panel** to open built-in services, an owned software variant, Field Notes, Server Histories, or an unlocked black-market/backdoor service. Adding a tool launches it in place; adding an already-running tool reuses its process. Atlas routing, broker acceptance/abort, the exchange, bank commands, notes, histories, and Wraith connections all work inside panels. The main app's terminal launcher and process dock also open/focus panels while you are on Workspace.
+
+On desktop, drag a panel's grip to move it or drag its lower corner to resize. Panels snap to a 12-column grid; overlapping panels move down into free space. Focus a grip or resize handle and use arrow keys for the same controls. Panel positions, sizes, visibility, and preferred software variants autosave to PostgreSQL for that save. Restore starter arrangement resets the panel arrangement without stopping processes.
+
+**Remove panel** hides its window and leaves its process running. **Stop** closes the process and frees RAM. Launch visible tools stops at a launch failure rather than ignoring a RAM limit. Your existing hardware, ownership, trace, contract, and payment rules still apply: the workspace adds no free capabilities and does not automate mission steps.
+
+At widths of 1050 px or less, panels stack vertically and layout handles are disabled. The saved desktop geometry is retained, so using a phone does not replace your desktop arrangement. Each panel scrolls independently.
+
+Layout saves have visible status and Retry. Failed/unsaved arrangements have a per-tab browser recovery copy; conflicting edits in another window require Reload saved arrangement or Keep my arrangement. A restarted runner has a new layout identity, preventing delayed layout saves from restoring old preferences. Database backups include workspace preferences; restarting a save resets only its arrangement. The development fresh-build database reset policy still applies.
+
 ## v0.7 — Field Notes and persistent server histories
 
 **Field Notes** is a sidebar notebook for the current save. It supports 50,000 characters and autosaves after 800 ms without typing. Saving status, manual Save now, failure messages, and Retry make persistence visible. Each save has its own PostgreSQL text, revision, and update time.
@@ -244,7 +258,7 @@ With `scripts/dev.sh` running:
 bash scripts/test.sh
 ```
 
-This runs the Django suite against a separate PostgreSQL test database, builds Vue, and runs Chromium browser tests. The database role needs permission to create the test database and a disposable lifecycle database. The lifecycle check uses `pg_dump` and `pg_restore` from PATH or `NETRUNNER_PG_BIN`, and verifies actual drop/recreation, restart persistence, and an archive round trip including generated content, backdoors, pending operations, Field Notes, and persistent server journals. It is skipped if those client tools are unavailable. Browser tests create accounts prefixed `e2e_` in the development database. They verify notebook autosave, conflicting edits and draft recovery, persistent server maintenance, hidden-market purchases, persistent direct backdoors, ransomware deployment, the manual tools-and-proxy contract loop, persistent cursor focus (including failed requests), bank charges, purchases/fitting/resale, three saves, sign-in persistence, confirmed bankruptcy recovery, and mobile layouts. The epic-market browser scenario uses the native Django environment to seed an offline test account with funds and memory; no public cheat API is provided. Set `CHROMIUM_PATH` if Chromium is not at `/usr/bin/chromium`.
+This runs the Django suite against a separate PostgreSQL test database, builds Vue, and runs Chromium browser tests. The database role needs permission to create the test database and a disposable lifecycle database. The lifecycle check uses `pg_dump` and `pg_restore` from PATH or `NETRUNNER_PG_BIN`, and verifies actual drop/recreation, restart persistence, and an archive round trip including generated content, backdoors, pending operations, Field Notes, workspace arrangements, and persistent server journals. It is skipped if those client tools are unavailable. Browser tests create accounts prefixed `e2e_` in the development database. They verify complete multi-tool workspace contracts, drag/resize persistence, layout conflicts, mobile stacking, notebook autosave, conflicting edits and draft recovery, persistent server maintenance, hidden-market purchases, persistent direct backdoors, ransomware deployment, the manual tools-and-proxy contract loop, persistent cursor focus (including failed requests), bank charges, purchases/fitting/resale, three saves, sign-in persistence, confirmed bankruptcy recovery, and mobile layouts. The epic-market browser scenario uses the native Django environment to seed an offline test account with funds and memory; no public cheat API is provided. Set `CHROMIUM_PATH` if Chromium is not at `/usr/bin/chromium`.
 
 Backend-only checks:
 

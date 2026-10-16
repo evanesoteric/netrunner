@@ -2,6 +2,14 @@
 
 Committed features and follow-up work. Speculative features belong in [IDEAS.md](IDEAS.md).
 
+## Completed in v0.8: Personal Workspace
+
+- [x] Add a separate Workspace sidebar page while preserving the existing screens.
+- [x] Run terminal, Atlas, installed tools, and service panels together on one page.
+- [x] Support snapped dragging, resizing, keyboard layout controls, and per-save PostgreSQL persistence.
+- [x] Keep existing software ownership, RAM, traces, and mission rules; distinguish hiding a panel from stopping a process.
+- [x] Preserve desktop arrangements on mobile and protect concurrent or failed layout saves.
+
 ## Completed in v0.7: Field Notes sidebar panel
 
 - [x] Add a Field Notes / Notepad editor accessible from the sidebar.

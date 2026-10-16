@@ -72,6 +72,8 @@ def serialize(slot, detailed=False):
                 contracts.append({**public_job(job, mapping), 'available_at': ready.isoformat() if ready else None})
         data.update({
             'contracts': contracts,
+            'workspace_layout': slot.workspace_layout,
+            'workspace_revision': slot.workspace_revision,
             'equipment': hardware(slot),
             'owned_hardware': slot.owned_hardware,
             'installed_software': slot.installed_software,
@@ -95,7 +97,7 @@ def serialize(slot, detailed=False):
 @ensure_csrf_cookie
 @api(['GET'], authenticated=False)
 def session(request):
-    return JsonResponse({'user': {'username': request.user.username} if request.user.is_authenticated else None, 'currency': CURRENCY, 'ranks': RANKS, 'version': '0.7.0', 'server_time': timezone.now().isoformat()})
+    return JsonResponse({'user': {'username': request.user.username} if request.user.is_authenticated else None, 'currency': CURRENCY, 'ranks': RANKS, 'version': '0.8.0', 'server_time': timezone.now().isoformat()})
 
 @api(['POST'], authenticated=False)
 def register(request):
@@ -231,7 +233,7 @@ def restart(request, slot_id):
     if request.data.get('confirmation') != slot.alias:
         raise GameError('Type the runner alias exactly to confirm restarting this slot.')
     fresh = SaveSlot(user=request.user, alias=slot.alias, position=slot.position)
-    for field in ['balance', 'reputation', 'completed', 'equipment', 'owned_hardware', 'installed_software', 'running_apps', 'proxy_route', 'atlas_nodes', 'active_contract', 'mission_started', 'mission_state', 'mission_log', 'contract_cooldowns', 'backdoors', 'ransomware_ops', 'remote_host', 'market_unlocked', 'field_notes', 'notes_revision', 'notes_updated_at']:
+    for field in ['balance', 'reputation', 'completed', 'equipment', 'owned_hardware', 'installed_software', 'running_apps', 'proxy_route', 'atlas_nodes', 'active_contract', 'mission_started', 'mission_state', 'mission_log', 'contract_cooldowns', 'backdoors', 'ransomware_ops', 'remote_host', 'market_unlocked', 'field_notes', 'notes_revision', 'notes_updated_at', 'workspace_layout', 'workspace_revision']:
         setattr(slot, field, getattr(fresh, field))
     slot.created_at = timezone.now()
     slot.save()
@@ -340,3 +342,31 @@ def server_history(request, slot_id):
         if len(rows) > 50:
             next_before = rows[49].id
     return JsonResponse({'servers': summaries, 'events': events, 'next_before': next_before, 'server_time': timezone.now().isoformat()})
+
+
+
+def workspace_data(slot):
+    from .workspace import default_workspace
+    return {'starter_layout': default_workspace(), 'layout': slot.workspace_layout, 'revision': slot.workspace_revision, 'identity': slot.created_at.isoformat()}
+
+
+@api(['GET', 'POST'])
+@transaction.atomic
+def workspace(request, slot_id):
+    from .workspace import validate_workspace
+    slot = SaveSlot.objects.select_for_update().get(pk=slot_id, user=request.user)
+    if request.method == 'GET':
+        return JsonResponse(workspace_data(slot))
+    if request.data.get('identity') != slot.created_at.isoformat():
+        return JsonResponse({'error': 'This runner was restarted. Its old arrangement cannot overwrite the new workspace.', 'workspace': workspace_data(slot)}, status=409)
+    layout = validate_workspace(request.data.get('layout'))
+    revision = request.data.get('revision')
+    if type(revision) is not int or revision < 0:
+        raise GameError('A valid workspace revision is required.')
+    if revision != slot.workspace_revision and layout != slot.workspace_layout:
+        return JsonResponse({'error': 'Another window saved a newer arrangement. Your layout has been retained for review.', 'workspace': workspace_data(slot)}, status=409)
+    if layout != slot.workspace_layout:
+        slot.workspace_layout = layout
+        slot.workspace_revision += 1
+        slot.save(update_fields=['workspace_layout', 'workspace_revision'])
+    return JsonResponse(workspace_data(slot))

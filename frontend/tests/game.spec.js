@@ -108,6 +108,7 @@ test('manual tools, proxy route, terminal focus, delivery, equipment and three s
   await page.getByRole('button', { name: 'Secondlife SLOT' }).click()
   await page.getByLabel('RUNNER ALIAS').fill('Thirdsignal')
   await page.getByRole('button', { name: 'Initialize slot' }).click()
+  await expect(page.getByRole('heading', { name: 'Welcome back, Thirdsignal' })).toBeVisible()
   await page.reload()
   await expect(page.getByRole('heading', { name: 'Welcome back, Thirdsignal' })).toBeVisible()
   await page.getByRole('button', { name: 'Thirdsignal SLOT' }).click()
@@ -251,4 +252,19 @@ test('sidebar services and persistent named-server directory on desktop and mobi
   await page.getByRole('button', { name: 'Network directory', exact: false }).click()
   await expect(page.getByRole('button', { name: 'Remove from Atlas' }).first()).toBeDisabled()
   await expect(page.getByRole('button', { name: 'Add to Atlas' }).first()).toBeDisabled()
+})
+
+
+test('fresh Ghost uses the displayed contract ID and gets accurate acceptance errors', async ({ page }) => {
+  await register(page, 'Ghostcheck')
+  await sidebar(page, 'Contract broker')
+  const cards = page.locator('.contract-card')
+  await expect(cards).toHaveCount(6)
+  const contractId = await cards.first().locator('.contract-id').innerText()
+  expect(contractId).toBe('0-0')
+  await page.getByRole('button', { name: 'Terminal launcher', exact: true }).click()
+  await cmd(page, 'accept helix-0.internal', 'Unknown contract ID')
+  await expect(page.getByRole('log')).not.toContainText('outside your rank')
+  await cmd(page, 'contracts', 'ID 0-0  [Ghost]')
+  await cmd(page, `accept ${contractId}`, 'Reservation confirmed: 0-0')
 })

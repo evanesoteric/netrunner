@@ -118,6 +118,51 @@ class SimulationTests(APIHelpers, TestCase):
         self.client.force_login(self.user)
         self.slot = SaveSlot.objects.create(user=self.user, position=1, alias='ghost')
 
+    def test_fresh_ghost_can_accept_every_contract_in_its_broker_listing(self):
+        self.launch('terminal')
+        listed = self.refresh()
+        self.assertEqual(listed['rank_name'], 'Ghost')
+        self.assertEqual({job['rank'] for job in listed['contracts']}, {0, 1})
+        self.assertEqual(len(listed['contracts']), 6)
+        for job in listed['contracts']:
+            with self.subTest(contract_id=job['id']):
+                SaveSlot.objects.filter(pk=self.slot.pk).update(active_contract='', mission_state={})
+                result = self.cmd(f'accept {job["id"]}')
+                self.assertIsNotNone(result['active_contract'], self.log_text(result))
+                self.assertEqual(result['active_contract']['id'], job['id'])
+                self.assertEqual(result['rank_name'], 'Ghost')
+
+    def test_unknown_contract_id_is_not_reported_as_rank_denial(self):
+        self.launch('terminal')
+        result = self.cmd('accept 0')
+        self.assertIsNone(result['active_contract'])
+        self.assertIn('Unknown contract ID', self.log_text(result))
+        self.assertNotIn('outside your rank', self.log_text(result))
+
+    def test_target_address_and_security_class_are_not_rank_failures(self):
+        self.launch('terminal')
+        for value in ['helix-0.internal', '1', 'nonexistent']:
+            with self.subTest(value=value):
+                result = self.cmd(f'accept {value}')
+                self.assertIsNone(result['active_contract'])
+                self.assertIn('Unknown contract ID', result['mission_log'][-1]['text'])
+                self.assertNotIn('rank clearance', result['mission_log'][-1]['text'])
+
+    def test_copied_contract_id_with_typographic_dash_is_accepted(self):
+        self.launch('terminal')
+        for dash in ['‐', '‑', '‒', '–', '—', '−']:
+            with self.subTest(dash=dash):
+                SaveSlot.objects.filter(pk=self.slot.pk).update(active_contract='', mission_state={})
+                result = self.cmd(f'accept 0{dash}0')
+                self.assertEqual(result['active_contract']['id'], '0-0')
+
+    def test_genuinely_ineligible_job_reports_actual_rank_and_clearance(self):
+        self.launch('terminal')
+        result = self.cmd('accept 2-0')
+        self.assertIsNone(result['active_contract'])
+        self.assertIn('its rank is Operator', result['mission_log'][-1]['text'])
+        self.assertIn('Ghost clearance covers Ghost through Signal', result['mission_log'][-1]['text'])
+
     def test_manual_reservation_does_not_connect_and_legacy_action_is_retired(self):
         self.post(self.endpoint('accept'), {'contract_id': '0-0'}, 410)
         response = self.reserve()

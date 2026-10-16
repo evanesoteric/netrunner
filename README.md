@@ -26,6 +26,12 @@ Back up the database, pull `main`, and rebuild as shown below. Django applies th
 
 Accounts retain three independent saves. Ranks are Ghost, Signal, Operator, Spectre, and Architect at 0, 100, 250, 450, and 700 reputation. Contracts are available at the runner's rank, one rank above, and one below. Products are purchasable through tier `min(5, rank + 2)`.
 
+### Contract IDs and starter clearance
+
+A new Ghost runner can reserve Ghost and Signal assignments. Use the **full contract ID** (for example, `0-0`) from the broker's CONTRACT ID field or the shell's `contracts` listing. The command is `accept 0-0`; the target address, security class, and rank number are separate values.
+
+Unknown IDs now produce an explicit ID error; valid jobs outside your clearance report the job's rank and your allowed rank range. Copied IDs using typographic hyphens are accepted. The v0.3.1 regression checks verify all six starter broker entries can be reserved by a fresh Ghost runner.
+
 ### Tool reference
 
 Each console has its own `help` manual. Commands run entirely inside the game's simulation; they never execute OS commands or access an external target.

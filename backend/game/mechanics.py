@@ -6,7 +6,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from .catalog import (
     BUILTIN_APPS, CONTRACTS, CONTRACT_BY_ID, FAILURE_COOLDOWN, HARDWARE,
-    PRODUCTS, RELAY_BY_ID, SOFTWARE, SUCCESS_COOLDOWN, HOME_NODE,
+    PRODUCTS, RELAY_BY_ID, SOFTWARE, SUCCESS_COOLDOWN, HOME_NODE, RANKS,
 )
 from .models import LedgerEntry
 
@@ -159,7 +159,7 @@ def trade(slot, action, product_id):
 
 
 MANUALS = {
-    'terminal': 'LOCAL SHELL\nhelp — application manual\napps — running processes and RAM\ncontracts — broker listings\naccept <id> — reserve a contract\nbrief — read the accepted brief\nroute — inspect the committed proxy chain\nconnect <host> — dial a fictional target\nstatus — gateway status\nls — remote file listing\nget <file> — copy a readable file to local storage\nrm <file> — remove a remote file\ndisconnect — end the remote session\nsubmit — deliver evidence to the broker\nabort — abandon the contract (fine and reputation loss)\nclear — clear local console output',
+    'terminal': 'LOCAL SHELL\nhelp — application manual\napps — running processes and RAM\ncontracts — broker listings\naccept <contract-id> — reserve by the full ID in contracts (example: accept 0-0)\nbrief — read the accepted brief\nroute — inspect the committed proxy chain\nconnect <host> — dial a fictional target\nstatus — gateway status\nls — remote file listing\nget <file> — copy a readable file to local storage\nrm <file> — remove a remote file\ndisconnect — end the remote session\nsubmit — deliver evidence to the broker\nabort — abandon the contract (fine and reputation loss)\nclear — clear local console output',
     'mapper': 'CARTOGRAPH\nscan <host> — inspect a fictional host and its services\nCosts 1 + tool tier CPH. Scan quality depends on tool capability.',
     'cracker': 'LOCKPICK\ncrack <port> — attack a discovered authentication service\nRequires an active remote connection. Underpowered tools can fail.',
     'decryptor': 'ROSETTA\ndecrypt <file> — decode an encrypted remote archive\nRequires file access and a sufficient decryption engine.',
@@ -172,9 +172,14 @@ MANUALS = {
 def reserve(slot, contract_id):
     if slot.active_contract:
         raise GameError('An assignment is already reserved.')
+    # Copying an ID through formatted text can substitute a typographic dash.
+    contract_id = contract_id.translate(str.maketrans({char: '-' for char in '‐‑‒–—−'}))
     job = CONTRACT_BY_ID.get(contract_id)
-    if not job or abs(job['rank'] - slot.rank) > 1:
-        raise GameError('Contract outside your rank clearance.')
+    if not job:
+        raise GameError(f'Unknown contract ID {contract_id!r}. Run contracts and use the full ID shown, such as 0-0. Target addresses and security classes are not contract IDs.')
+    if abs(job['rank'] - slot.rank) > 1:
+        lower, upper = max(0, slot.rank - 1), min(len(RANKS) - 1, slot.rank + 1)
+        raise GameError(f'Contract {contract_id} is outside your rank clearance: its rank is {RANKS[job["rank"]]}; your {RANKS[slot.rank]} clearance covers {RANKS[lower]} through {RANKS[upper]}.')
     ready = available_at(slot, contract_id)
     if ready and ready > timezone.now():
         raise GameError('The broker is still sourcing a replacement assignment. Check its availability time.')
@@ -290,7 +295,7 @@ def _shell(slot, verb, args, job):
     if verb == 'apps' and not args:
         return '\n'.join(f'{key}: {BUILTIN_APPS[value]["name"] if value in BUILTIN_APPS else SOFTWARE[value]["name"]}' for key, value in slot.running_apps.items()) + f'\nRAM: {ram_used(slot)} / {hardware(slot)["memory"]["ram"]} GB'
     if verb == 'contracts' and not args:
-        return '\n'.join(f'{c["id"]}  {c["title"]}  {c["reward"]} CPH  {"cooling down" if available_at(slot, c["id"]) and available_at(slot, c["id"]) > timezone.now() else "available"}' for c in CONTRACTS if abs(c['rank'] - slot.rank) <= 1)
+        return '\n'.join(f'ID {c["id"]}  [{RANKS[c["rank"]]}]  {c["title"]}  {c["reward"]} CPH  {"cooling down" if available_at(slot, c["id"]) and available_at(slot, c["id"]) > timezone.now() else "available"}' for c in CONTRACTS if abs(c['rank'] - slot.rank) <= 1)
     if verb == 'accept' and len(args) == 1:
         return reserve(slot, args[0])
     if verb == 'route' and not args:

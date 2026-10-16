@@ -1,5 +1,13 @@
 # Gameplay reference
 
+## Terminal workflow
+
+**Tab** completes command prefixes; multiple matches are listed without executing anything. If no prefix matches, completion tries a fuzzy subsequence match. Keep typing to narrow the list, or click a match. Known hostnames, contract IDs, license IDs, and filenames from briefs or scan output can also be completed. **Shift+Tab** keeps normal keyboard navigation available.
+
+Scrolling up pauses automatic following. Polls and newly arriving output leave your place alone. **Jump to latest output**, or submitting a command, returns to the bottom. Logged-out file operations explicitly ask you to log in.
+
+Run `scan <host>` directly in the main terminal with an owned Cartograph license. It uses the running Cartograph version if present, otherwise the strongest owned version that fits free RAM. The same compute costs, security checks, trace effects, and service fingerprints apply. A terminal scan does not leave a mapper process running, so the Cartograph panel can stay closed. The separate Cartograph application remains available with its existing console.
+
 ## Graphical password breaker
 
 Connect to a server from the local terminal and scan its authentication service with Cartograph. **Open password breaker**, or type `lockpick` in the terminal, to open the server-login modal. Lockpick also remains available through Applications and Workspace.
@@ -40,7 +48,7 @@ Each console has its own `help` manual. Commands run entirely inside the game's 
 
 | Application | Commands / purpose |
 | --- | --- |
-| Local terminal | `apps`, `contracts`, `accept <id>`, `brief`, `route`, `connect <host>`, `lockpick`, `logcleaner [license-id]`, `status`, `ls`, `get <file>`, `rm <file>`, `disconnect`, `submit`, `abort`, `clear` |
+| Local terminal | `apps`, `contracts`, `accept <id>`, `brief`, `route`, `connect <host>`, `lockpick`, `scan <host>`, `logcleaner [license-id]`, `status`, `ls`, `get <file>`, `rm <file>`, `disconnect`, `submit`, `abort`, `clear` |
 | Cartograph | `scan <host>` discovers authentication ports and archive metadata |
 | Lockpick | Graphical password breaker: scan a server, connect to its login, then click **Break password** |
 | Rosetta | `decrypt <file>` operates on an accessible encrypted archive |

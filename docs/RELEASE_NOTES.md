@@ -2,6 +2,10 @@
 
 Historical feature and migration notes. See the [README](../README.md) for the current project overview and [development guide](DEVELOPMENT.md) for setup and maintenance.
 
+## v0.11 — terminal completion and optional Cartograph panel
+
+Terminals preserve scrollback during polls and new output, with an explicit jump to latest output. Tab supports prefix completion, fuzzy fallback, and contextual arguments. The main terminal can run Cartograph scans using owned software while the separate app remains available. Logged-out file commands now identify the missing login explicitly.
+
 ## v0.10 — terminal workflow and trace tracker
 
 Added a fixed floating trace tracker, a terminal-launched login modal with admin credentials and decoding inside the password field, explicit Login after decoding, and a short software purchase build animation. Logcleaner replaces Ashfall as a licensed terminal extension. Migration `0008` retires cleaner processes and panels while retaining licenses, other panels, and save progress. See the [gameplay guide](GAMEPLAY.md).

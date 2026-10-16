@@ -207,8 +207,9 @@ class SimulationTests(APIHelpers, TestCase):
         self.post(self.endpoint('command'), {'command': 'help', 'application': 'terminal'}, 400)
         self.reserve()
         response = self.cmd('scan helix-0.internal')
-        self.assertIn('Unknown shell command', self.log_text(response))
-        self.assertFalse(self.slot.mission_state.get('scanned'))
+        self.assertIn('Scan complete', self.log_text(response))
+        self.slot.refresh_from_db()
+        self.assertTrue(self.slot.mission_state.get('scanned'))
         self.post(self.endpoint('applications'), {'action': 'launch', 'product_id': 'decryptor-5-standard'}, 400)
 
     def test_ram_limits_process_close_and_tool_variants(self):
@@ -1307,7 +1308,7 @@ class PasswordBreakerTests(APIHelpers, TestCase):
         self.assertFalse(result['authenticated'])
         self.assertFalse(result['trace_active'])
         self.assertFalse(self.slot.server_states.get(address='helix-0.internal').remote_logs)
-        self.assertIn('Permission denied', self.log_text(self.cmd('get research.dat')))
+        self.assertIn('not logged in', self.log_text(self.cmd('get research.dat')))
 
     def test_monitor_reports_no_active_trace_at_server_login(self):
         self.post(self.endpoint('applications'), {'action': 'close', 'application': 'mapper'})
@@ -1521,3 +1522,66 @@ class IntegratedLogcleanerMigrationTests(TransactionTestCase):
         finally:
             restore = MigrationExecutor(connection)
             restore.migrate(restore.loader.graph.leaf_nodes())
+
+
+class TerminalCartographTests(APIHelpers, TestCase):
+    def setUp(self):
+        user = get_user_model().objects.create_user('terminal-scanner')
+        self.client.force_login(user)
+        self.slot = SaveSlot.objects.create(user=user, position=1, alias='scanner')
+        self.launch('terminal')
+
+    def test_scan_uses_owned_software_without_leaving_a_process_running(self):
+        self.reserve()
+        before = self.refresh()
+        result = self.cmd('scan helix-0.internal')
+        self.assertIn('22/tcp  OPEN', result['mission_log'][-1]['text'])
+        self.assertEqual(result['mission_log'][-1]['app'], 'terminal')
+        self.assertEqual(result['balance'], before['balance'] - 2)
+        self.assertNotIn('mapper', [app['id'] for app in result['running_apps']])
+        self.assertEqual(result['ram_used'], before['ram_used'])
+        self.slot.refresh_from_db()
+        self.assertEqual(self.slot.mission_state['scanned_host'], 'helix-0.internal')
+        self.cmd('connect helix-0.internal')
+        self.launch('cracker-1-standard')
+        self.assertTrue(self.cmd('crack 22', 'cracker')['authenticated'])
+
+    def test_running_mapper_is_reused_and_standalone_output_is_unchanged(self):
+        self.reserve()
+        self.launch('mapper-1-standard')
+        standalone = self.cmd('scan helix-0.internal', 'mapper')['mission_log'][-1]['text']
+        result = self.cmd('scan helix-0.internal')
+        self.assertEqual(result['mission_log'][-1]['text'], standalone)
+        self.assertEqual(next(app['product_id'] for app in result['running_apps'] if app['id'] == 'mapper'), 'mapper-1-standard')
+
+    def test_scan_requires_license_funds_memory_and_capability(self):
+        self.reserve()
+        self.slot.refresh_from_db()
+        self.slot.installed_software = []
+        self.slot.save()
+        self.assertIn('Cartograph license is required', self.cmd('scan helix-0.internal')['mission_log'][-1]['text'])
+        self.slot.refresh_from_db()
+        self.slot.installed_software = ['mapper-1-standard']
+        self.slot.balance = 0
+        self.slot.save()
+        self.assertIn('Insufficient CPH', self.cmd('scan helix-0.internal')['mission_log'][-1]['text'])
+        self.slot.refresh_from_db()
+        self.slot.balance = 1000
+        self.slot.equipment['memory'] = 'memory-1-specialist'
+        self.slot.running_apps = {'terminal': 'terminal', 'cracker': 'cracker-5-standard', 'decryptor': 'decryptor-5-standard', 'atlas': 'atlas'}
+        self.slot.save()
+        self.assertIn('Not enough free RAM', self.cmd('scan helix-0.internal')['mission_log'][-1]['text'])
+        self.slot.refresh_from_db()
+        self.slot.running_apps = {'terminal': 'terminal'}
+        self.slot.save()
+        self.cmd('scan helix-0.internal')
+        self.slot.server_states.filter(address='helix-0.internal').update(security=2)
+        self.assertIn('insufficient', self.cmd('scan helix-0.internal')['mission_log'][-1]['text'])
+
+    def test_logged_out_file_commands_are_explicit_before_and_after_connect(self):
+        for command in ('ls', 'get research.dat', 'rm research.dat'):
+            self.assertIn('not logged in', self.cmd(command)['mission_log'][-1]['text'])
+        self.reserve()
+        self.cmd('connect helix-0.internal')
+        for command in ('ls', 'get research.dat', 'rm research.dat'):
+            self.assertIn('not logged in', self.cmd(command)['mission_log'][-1]['text'])

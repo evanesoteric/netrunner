@@ -185,7 +185,7 @@ def trade(slot, action, product_id):
 
 
 MANUALS = {
-    'terminal': 'LOCAL SHELL\nhelp — application manual\nrumors — intercepted hidden-service invitation\njump <host> — use an installed Wraith backdoor\napps — running processes and RAM\ncontracts — broker listings\naccept <contract-id> — reserve by the numeric ID in contracts (0–255)\nbrief — read the accepted brief\nroute — inspect the committed proxy chain\nconnect <host> — dial a fictional target\nlogcleaner [license-id] — erase remote logs with an owned Logcleaner license\nlockpick — open the server login dialog\nstatus — gateway status\nhistory — recent operator journal for this target\nls — remote file listing\nget <file> — copy a readable file to local storage\nrm <file> — remove a remote file\ndisconnect — end the remote session\nsubmit — deliver evidence to the broker\nabort — abandon the contract (fine and reputation loss)\nclear — clear local console output',
+    'terminal': 'LOCAL SHELL\nhelp — application manual\nrumors — intercepted hidden-service invitation\njump <host> — use an installed Wraith backdoor\napps — running processes and RAM\ncontracts — broker listings\naccept <contract-id> — reserve by the numeric ID in contracts (0–255)\nbrief — read the accepted brief\nroute — inspect the committed proxy chain\nconnect <host> — dial a fictional target\nscan <host> — scan with owned Cartograph software\nlogcleaner [license-id] — erase remote logs with an owned Logcleaner license\nlockpick — open the server login dialog\nstatus — gateway status\nhistory — recent operator journal for this target\nls — remote file listing\nget <file> — copy a readable file to local storage\nrm <file> — remove a remote file\ndisconnect — end the remote session\nsubmit — deliver evidence to the broker\nabort — abandon the contract (fine and reputation loss)\nclear — clear local console output',
     'mapper': 'CARTOGRAPH\nscan <host> — inspect a fictional host and its services\nCosts 1 + tool tier CPH. Scan quality depends on tool capability.',
     'cracker': 'LOCKPICK\nOpen the graphical password breaker from Applications. Connect to a server login and scan its authentication service first.',
     'decryptor': 'ROSETTA\ndecrypt <file> — decode an encrypted remote archive\nRequires file access and a sufficient decryption engine.',
@@ -262,6 +262,10 @@ def execute(slot, app, raw):
                 result = 'Unknown bank command. Read help for the bank manual.'
         elif app == 'terminal':
             result = _shell(slot, verb, args, job)
+        elif app == 'mapper':
+            if verb != 'scan' or len(args) != 1:
+                raise GameError('Unknown command or arguments for this application. Read help for its manual.')
+            result = scan_target(slot, args[0])
         elif app == 'cracker':
             if verb != 'crack' or len(args) != 1:
                 raise GameError('Open the graphical Lockpick password breaker.')
@@ -279,7 +283,7 @@ def execute(slot, app, raw):
                 raise GameError('Use deploy <host> on an amber opportunity server.')
             result = deploy_ransomware(slot, args[0])
         else:
-            usages = {'mapper': ('scan', 1), 'cracker': ('crack', 1), 'decryptor': ('decrypt', 1), 'monitor': ('trace', 0)}
+            usages = {'decryptor': ('decrypt', 1), 'monitor': ('trace', 0)}
             expected, count = usages[app]
             if verb != expected or len(args) != count:
                 raise GameError('Unknown command or arguments for this application. Read help for its manual.')
@@ -292,34 +296,14 @@ def execute(slot, app, raw):
                     remaining = trace_remaining(slot)
                     result = f'Trace remaining: {remaining} seconds.' if remaining is not None else 'No active remote trace.'
             else:
-                if app == 'mapper' and not slot.mission_started:
-                    from .operations import find_target
-                    job = effective_target(slot, find_target(slot, args[0]))
-                if not job:
-                    raise GameError('No target. Scan a directory server or reserve an assignment.')
-                if app != 'mapper' and not slot.mission_started:
-                    raise GameError('No remote session.')
-                if app == 'mapper' and args[0] != job['target']:
-                    raise GameError('Host not present in your reserved network directory.')
-                charged, tool = _tool_work(slot, app, {'mapper': 8, 'cracker': 22, 'decryptor': 18, 'cleaner': 14}[app])
+                require_login(slot)
+                charged, tool = _tool_work(slot, app, 18)
                 if not charged:
                     raise GameError(tool)
-                if slot.mission_started and state.get('access'):
-                    state['dirty'] = True
+                state['dirty'] = True
                 if tool['power'] < job['security']:
                     raise GameError(f'Tool capability {tool["power"]} is insufficient for security class {job["security"]}. Operation failed.')
-                if app == 'mapper':
-                    server = ensure_server(slot, job)
-                    observe(server)
-                    event(server, 'scanned', f'Service fingerprint observed: port {job["port"]}, revision {server.revision}.')
-                    server.save()
-                    state['scanned_revision'] = server.revision
-                    state['scanned'] = True
-                    state['scanned_host'] = job['target']
-                    if slot.mission_started and state.get('access'):
-                        state['dirty'] = True
-                    result = f'Host: {job["target"]}\n{job["port"]}/tcp  OPEN  auth-v{job["security"]} / patch r{job.get("server_revision", 1)}\nArchive: {job["file"] if job.get("file_present", True) else "missing"} / {job["size"]} MB / {"encrypted" if job["encrypted"] else "plaintext"}\nOther ports: filtered. Scan complete.'
-                elif app == 'decryptor':
+                if app == 'decryptor':
                     if not state.get('access') or args[0] != job['file'] or not job.get('file_present', True):
                         raise GameError('Archive unavailable or access denied.')
                     if not job['encrypted']:
@@ -338,9 +322,48 @@ def execute(slot, app, raw):
     settle(slot)
 
 
-def clean_logs(slot, license_id=None):
+def require_login(slot):
     if not slot.mission_started or not slot.mission_state.get('access'):
-        raise GameError('Permission denied: log in before cleaning remote logs.')
+        raise GameError('You are not logged in. Connect to a server and log in first.')
+
+
+def scan_target(slot, address, integrated=False):
+    from .operations import find_target
+    target = current_target(slot) if slot.mission_started else effective_target(slot, find_target(slot, address))
+    if not target or address != target['target']:
+        raise GameError('Host not present in your reserved network directory.')
+    previous = slot.running_apps
+    if integrated and 'mapper' not in previous:
+        licenses = [SOFTWARE[key] for key in slot.installed_software if key in SOFTWARE and SOFTWARE[key]['kind'] == 'mapper']
+        if not licenses:
+            raise GameError('An owned Cartograph license is required to scan from the terminal.')
+        free_ram = hardware(slot)['memory']['ram'] - ram_used(slot)
+        licenses = [tool for tool in licenses if tool['ram'] <= free_ram]
+        if not licenses:
+            raise GameError('Not enough free RAM for Cartograph. Close a tool or use a Micro license.')
+        tool = max(licenses, key=lambda tool: (tool['power'], tool['speed']))
+        slot.running_apps = {**previous, 'mapper': tool['id']}
+    try:
+        charged, tool = _tool_work(slot, 'mapper', 8)
+    finally:
+        slot.running_apps = previous
+    if not charged:
+        raise GameError(tool)
+    state = slot.mission_state
+    if slot.mission_started and state.get('access'):
+        state['dirty'] = True
+    if tool['power'] < target['security']:
+        raise GameError(f'Tool capability {tool["power"]} is insufficient for security class {target["security"]}. Operation failed.')
+    server = ensure_server(slot, target)
+    observe(server)
+    event(server, 'scanned', f'Service fingerprint observed: port {target["port"]}, revision {server.revision}.')
+    server.save()
+    state.update(scanned_revision=server.revision, scanned=True, scanned_host=target['target'])
+    return f'Host: {target["target"]}\n{target["port"]}/tcp  OPEN  auth-v{target["security"]} / patch r{target.get("server_revision", 1)}\nArchive: {target["file"] if target.get("file_present", True) else "missing"} / {target["size"]} MB / {"encrypted" if target["encrypted"] else "plaintext"}\nOther ports: filtered. Scan complete.'
+
+
+def clean_logs(slot, license_id=None):
+    require_login(slot)
     choices = [SOFTWARE[key] for key in slot.installed_software if key in SOFTWARE and SOFTWARE[key]['kind'] == 'cleaner']
     if license_id:
         choices = [tool for tool in choices if tool['id'] == license_id]
@@ -369,6 +392,10 @@ def clean_logs(slot, license_id=None):
 
 def _shell(slot, verb, args, job):
     arity = {'history': 0, 'jump': 1, 'rumors': 0, 'apps': 0, 'contracts': 0, 'accept': 1, 'route': 0, 'status': 0, 'brief': 0, 'abort': 0, 'connect': 1, 'submit': 0, 'disconnect': 0, 'ls': 0, 'get': 1, 'rm': 1}
+    if verb == 'scan':
+        if len(args) != 1:
+            raise GameError('Use scan <host>.')
+        return scan_target(slot, args[0], integrated=True)
     if verb == 'logcleaner':
         if len(args) > 1:
             raise GameError('Use logcleaner [license-id].')
@@ -397,6 +424,8 @@ def _shell(slot, verb, args, job):
         return 'GATEWAY → ' + ' → '.join([get_server(key)['name'] + ' [' + get_server(key)['address'] + ']' for key in slot.proxy_route] + ['TARGET']) + f'\nConnection lease: {route_stats(slot)["fee"]} CPH'
     if verb == 'status' and not args:
         return f'Balance: {slot.balance} CPH\nRAM: {ram_used(slot)}/{hardware(slot)["memory"]["ram"]} GB\nRemote: {job["target"] if job and slot.mission_started else "disconnected"}\nLocal archive: {job["file"] if job and state.get("recovered") else "empty"}'
+    if verb in ('ls', 'get', 'rm'):
+        require_login(slot)
     if not job:
         raise GameError('No reserved contract.')
     if verb == 'brief' and not args:
@@ -440,8 +469,6 @@ def _shell(slot, verb, args, job):
         slot.remote_host = {}
         return 'Remote link closed. No access signature found.'
     if verb in ('ls', 'get', 'rm'):
-        if not state.get('access'):
-            raise GameError('Permission denied.')
         if verb == 'ls' and not args:
             state['dirty'] = True
             record_action(slot, job, 'directory_listed', 'Remote directory inspected.', snapshot=True)

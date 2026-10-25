@@ -1,6 +1,7 @@
 """Built-in content plus durable, locally generated world content."""
 from .catalog import CONTRACTS, CONTRACT_BY_ID, RELAYS, RELAY_BY_ID
 from .models import DirectoryServer, GeneratedMission
+from .public_servers import PUBLIC_SERVERS, PUBLIC_BY_ID
 
 
 def all_contracts():
@@ -17,13 +18,15 @@ def get_contract(key):
 
 
 def all_servers(slot=None):
-    entries = RELAYS + [row.data for row in DirectoryServer.objects.order_by('key')]
+    entries = RELAYS + PUBLIC_SERVERS + [row.data for row in DirectoryServer.objects.order_by('key')]
     return [entry for entry in entries if not entry.get('hidden') or (slot and slot.market_unlocked)]
 
 
 def get_server(key):
     if key in RELAY_BY_ID:
         return RELAY_BY_ID[key]
+    if key in PUBLIC_BY_ID:
+        return PUBLIC_BY_ID[key]
     row = DirectoryServer.objects.filter(pk=key).first()
     return row.data if row else None
 

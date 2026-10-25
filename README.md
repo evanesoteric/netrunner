@@ -60,11 +60,11 @@ Stop with **Ctrl+C**, then `docker compose down`. Start again with `docker compo
 ## Core features
 
 - **Manual hacking:** scan targets, crack authentication, retrieve or delete files, clean remote logs, and submit proof for payment.
-- **Proxy routing:** chain named servers on Atlas to buy trace time, balancing connection costs and latency.
+- **Proxy routing:** discover dozens of public-access proxies and chain named servers on Atlas to buy trace time, balancing connection costs and latency.
 - **Custom rigs:** choose hardware and individual software licenses; manage RAM, storage, tool capabilities, and running processes.
 - **Contracts and rank:** rise from Ghost to Architect. Jobs are available at your rank, one above, and one below. Failed contracts carry financial and reputation penalties.
 - **Cipher economy:** earn and spend fictional cryptocurrency (CPH), manage a bank account, and trade equipment.
-- **Persistent worlds:** each save has its own server state, visit history, notes, and saved workspace arrangement.
+- **Persistent worlds:** each save has its own local files, server state, visit history, notes, and saved workspace arrangement.
 - **Hidden discoveries:** uncover the Null Exchange, epic software, backdoors, and ransomware opportunities.
 
 ## Pages and tools

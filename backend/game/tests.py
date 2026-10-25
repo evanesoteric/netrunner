@@ -294,7 +294,7 @@ class SimulationTests(APIHelpers, TestCase):
     def test_encrypted_archive_requires_separate_decryptor(self):
         self.gain_access('0-1')
         response = self.cmd('get ledger.enc')
-        self.assertIn('Archive encrypted', self.log_text(response))
+        self.assertTrue(response['local_files'][0]['encrypted'])
         self.post(self.endpoint('applications'), {'action': 'close', 'application': 'mapper'})
         # End the session safely to buy a license; cracked files are preserved only in this game session.
         self.cmd('logcleaner')
@@ -441,7 +441,7 @@ class SimulationTests(APIHelpers, TestCase):
     def test_atlas_has_named_saved_servers_and_full_network_directory(self):
         result = self.refresh()
         self.assertEqual(len(result['relays']), 4)
-        self.assertEqual(len(result['network_directory']), 16)
+        self.assertEqual(len(result['network_directory']), 56)
         names = {server['name'] for server in result['relays']}
         self.assertIn('Intel Corp: Public Access', names)
         self.assertIn('MilTech Research Center', names)
@@ -529,7 +529,8 @@ class ConcurrentEconomyTests(APIHelpers, TransactionTestCase):
 
     def test_concurrent_submissions_only_pay_once(self):
         self.slot.active_contract = '0-0'
-        self.slot.mission_state = {'recovered': True, 'clean_exit': True}
+        self.slot.local_files = [dict(id='proof', name='research.dat', size=24, source='helix-0.internal', source_path='research.dat')]
+        self.slot.mission_state = {'recovered': True, 'local_file_id': 'proof', 'clean_exit': True}
         self.slot.save()
         self.assertEqual(self.parallel_post('command', {'application': 'terminal', 'command': 'submit'}), [200, 200])
         self.slot.refresh_from_db()
@@ -727,7 +728,7 @@ class DevelopmentDatabaseLifecycleTests(TestCase):
                     "slot.market_unlocked=True; slot.installed_software += ['rootkit-epic', 'ransomware-epic']; slot.save()")
                 run(sys.executable, str(manage), 'shell', '-c',
                     "from game.models import SaveSlot; from game.world import get_server, target_for_server; from game.persistence import ensure_server, event; "
-                    "slot = SaveSlot.objects.get(alias='Archive'); slot.field_notes='Archive notebook: follow the old relay'; slot.notes_revision=2; slot.workspace_layout=[dict(id='terminal', product_id='terminal', x=1, y=2, w=9, h=6)]; slot.workspace_revision=4; slot.save(); "
+                    "slot = SaveSlot.objects.get(alias='Archive'); slot.field_notes='Archive notebook: follow the old relay'; slot.notes_revision=2; slot.workspace_layout=[dict(id='terminal', product_id='terminal', x=1, y=2, w=9, h=6)]; slot.workspace_revision=4; slot.local_files=[dict(id='backup-file', name='archive.dat', size=12, source='backup.internal', source_path='archive.dat')]; slot.save(); "
                     "server = ensure_server(slot, target_for_server(get_server('world-0'))); server.files[0]['present']=False; server.visits=3; server.save(); event(server, 'file_deleted', 'Archive proof retained')")
                 identities = query('SELECT template_key, code FROM game_contractidentity ORDER BY template_key')
                 query('CREATE TABLE lifecycle_probe (value text)')
@@ -752,6 +753,7 @@ class DevelopmentDatabaseLifecycleTests(TestCase):
                 self.assertEqual(query('SELECT count(*) FROM game_generatedmission'), [(1,)])
                 self.assertEqual(query('SELECT count(*) FROM game_directoryserver'), [(6,)])
                 self.assertEqual(query('SELECT field_notes, notes_revision FROM game_saveslot'), [('Archive notebook: follow the old relay', 2)])
+                self.assertEqual(query("SELECT local_files->0->>'name', local_files->0->>'size' FROM game_saveslot"), [('archive.dat', '12')])
                 self.assertEqual(query("SELECT workspace_revision, workspace_layout->0->>'x', workspace_layout->0->>'w' FROM game_saveslot"), [(4, '1', '9')])
                 self.assertEqual(query("SELECT address, visits, files->0->>'present' FROM game_serverstate"), [('vesper-dispatch.internal', 3, 'false')])
                 self.assertEqual(query("SELECT count(*) FROM game_serverevent WHERE kind='file_deleted'"), [(1,)])
@@ -1512,7 +1514,7 @@ class IntegratedLogcleanerMigrationTests(TransactionTestCase):
             slot = old.get_model('game', 'SaveSlot').objects.create(user_id=user.pk, position=1, alias='Veteran', balance=7654, field_notes='Keep this notebook', installed_software=['cleaner-1-standard', 'cleaner-2-compact'], running_apps={'terminal':'terminal', 'cleaner':'cleaner-1-standard'}, workspace_layout=[terminal, cleaner], workspace_revision=7)
             executor = MigrationExecutor(connection)
             executor.migrate([('game', '0008_integrated_logcleaner')])
-            updated = SaveSlot.objects.get(pk=slot.pk)
+            updated = executor.loader.project_state([('game', '0008_integrated_logcleaner')]).apps.get_model('game', 'SaveSlot').objects.get(pk=slot.pk)
             self.assertEqual(updated.balance, 7654)
             self.assertEqual(updated.field_notes, 'Keep this notebook')
             self.assertEqual(updated.installed_software, ['cleaner-1-standard', 'cleaner-2-compact'])
@@ -1579,9 +1581,203 @@ class TerminalCartographTests(APIHelpers, TestCase):
         self.assertIn('insufficient', self.cmd('scan helix-0.internal')['mission_log'][-1]['text'])
 
     def test_logged_out_file_commands_are_explicit_before_and_after_connect(self):
-        for command in ('ls', 'get research.dat', 'rm research.dat'):
-            self.assertIn('not logged in', self.cmd(command)['mission_log'][-1]['text'])
+        self.assertIn('LOCAL FILESYSTEM', self.cmd('ls')['mission_log'][-1]['text'])
+        self.assertIn('not logged in', self.cmd('get research.dat')['mission_log'][-1]['text'])
+        self.assertIn('Local file not found', self.cmd('rm research.dat')['mission_log'][-1]['text'])
         self.reserve()
         self.cmd('connect helix-0.internal')
         for command in ('ls', 'get research.dat', 'rm research.dat'):
             self.assertIn('not logged in', self.cmd(command)['mission_log'][-1]['text'])
+
+
+class LocalFilesystemTests(APIHelpers, TestCase):
+    def setUp(self):
+        user = get_user_model().objects.create_user('local-fs')
+        self.client.force_login(user)
+        self.slot = SaveSlot.objects.create(user=user, position=1, alias='Local')
+
+    def download(self):
+        self.gain_access()
+        result = self.cmd('get research.dat')
+        self.clean_exit()
+        return result
+
+    def test_download_survives_delivery_and_can_be_removed_to_reclaim_space(self):
+        downloaded = self.download()
+        self.assertEqual(downloaded['storage_used'], 24)
+        self.assertEqual(len(downloaded['local_files']), 1)
+        result = self.cmd('submit')
+        self.assertIn('Delivery verified', result['mission_log'][-1]['text'])
+        self.assertEqual(result['storage_used'], 24)
+        self.assertIn('research.dat', self.cmd('ls')['mission_log'][-1]['text'])
+        result = self.cmd('rm research.dat')
+        self.assertIn('Reclaimed 24 MB', result['mission_log'][-1]['text'])
+        self.assertEqual(result['storage_used'], 0)
+        self.assertEqual(self.refresh()['local_files'], [])
+
+    def test_removing_delivery_file_before_submit_invalidates_proof(self):
+        self.download()
+        self.cmd('rm research.dat')
+        result = self.cmd('submit')
+        self.assertIn('Broker rejected', result['mission_log'][-1]['text'])
+        self.assertEqual(result['completed'], 0)
+
+    def test_repeated_download_replaces_same_copy_and_remote_rm_keeps_local_copy(self):
+        self.gain_access()
+        first = self.cmd('get research.dat')
+        second = self.cmd('get research.dat')
+        self.assertEqual(first['local_files'][0]['id'], second['local_files'][0]['id'])
+        self.assertEqual(second['storage_used'], 24)
+        self.cmd('rm research.dat')
+        self.assertEqual(self.refresh()['storage_used'], 24)
+        self.clean_exit()
+        self.assertIn('research.dat', self.cmd('ls')['mission_log'][-1]['text'])
+
+    def test_storage_limit_accounts_for_all_local_files(self):
+        self.gain_access()
+        self.slot.refresh_from_db()
+        self.slot.local_files = [dict(id='big', name='old.dat', size=150, source='old.internal', source_path='old.dat')]
+        self.slot.save()
+        result = self.cmd('get research.dat')
+        self.assertIn('Local storage full', result['mission_log'][-1]['text'])
+        self.assertEqual(result['storage_used'], 150)
+        self.assertEqual(len(result['local_files']), 1)
+
+    def test_filename_collisions_preserve_both_sources(self):
+        from .mechanics import copy_to_local
+        self.slot.local_files = [dict(id='old', name='research.dat', size=10, source='other.internal', source_path='research.dat')]
+        entry = copy_to_local(self.slot, {**CONTRACT_BY_ID['0-0'], 'size': 24})
+        self.assertEqual(entry['name'], 'research_2.dat')
+        self.assertEqual({entry['name'] for entry in self.slot.local_files}, {'research.dat', 'research_2.dat'})
+
+    def test_smaller_drive_cannot_be_fitted_if_files_do_not_fit(self):
+        self.slot.equipment['storage'] = 'storage-2-standard'
+        self.slot.local_files = [dict(id='large', name='large.dat', size=200, source='old.internal', source_path='large.dat')]
+        self.slot.save()
+        self.post(self.endpoint('loadout'), {'action': 'equip', 'product_id': 'storage-1-standard'}, 400)
+
+    def test_other_slots_are_independent_and_restart_clears_files(self):
+        self.download()
+        other = SaveSlot.objects.create(user=self.slot.user, position=2, alias='Other')
+        self.assertEqual(self.client.get(f'/api/slots/{other.pk}/').json()['local_files'], [])
+        self.post(self.endpoint('restart'), {'confirmation': 'Local'})
+        self.assertEqual(self.refresh()['local_files'], [])
+        self.assertEqual(self.refresh()['storage_used'], 0)
+
+
+class TraceClockTests(APIHelpers, TestCase):
+    def setUp(self):
+        user = get_user_model().objects.create_user('trace-clock')
+        self.client.force_login(user)
+        self.slot = SaveSlot.objects.create(user=user, position=1, alias='Clock')
+        self.gain_access()
+
+    def test_trace_clock_runs_without_monitor_but_deadline_requires_capable_monitor(self):
+        from unittest.mock import patch
+        self.slot.refresh_from_db()
+        started = self.slot.mission_state['trace_started']
+        result = self.refresh()
+        self.assertEqual(result['trace_started_at'], started)
+        self.assertIsNone(result['trace_deadline'])
+        self.assertIsNone(result['trace_remaining'])
+        self.slot.installed_software.append('monitor-1-standard')
+        self.slot.save()
+        result = self.launch('monitor-1-standard')
+        deadline = result['trace_deadline']
+        from django.utils.dateparse import parse_datetime
+        self.assertIsNotNone(deadline)
+        with patch('django.utils.timezone.now', return_value=timezone.now() + timedelta(seconds=5)):
+            later = self.refresh()
+        self.assertEqual(deadline, later['trace_deadline'])
+        self.assertLessEqual(later['trace_remaining'], result['trace_remaining'] - 4)
+        self.assertEqual(later['trace_started_at'], started)
+
+
+class PublicProxyTests(APIHelpers, TestCase):
+    def setUp(self):
+        user = get_user_model().objects.create_user('public-proxies')
+        self.client.force_login(user)
+        self.slot = SaveSlot.objects.create(user=user, position=1, alias='Public')
+
+    def test_new_public_proxies_can_be_bookmarked_routed_and_visited(self):
+        data = self.refresh()
+        nodes = [node for node in data['network_directory'] if node['id'].startswith('public-')]
+        self.assertEqual(len(nodes), 40)
+        self.assertEqual(len({node['address'] for node in nodes}), 40)
+        self.assertTrue(all(node['rank'] == 0 and node['address'].endswith('.internal') and not node['exploitable'] for node in nodes))
+        self.post(self.endpoint('directory'), {'action': 'add', 'server_id': 'public-01'})
+        self.post(self.endpoint('route'), {'nodes': ['public-01']})
+        self.reserve()
+        self.cmd('connect helix-0.internal')
+        self.assertEqual(self.slot.server_states.get(address=nodes[0]['address']).visits, 1)
+
+
+class LocalFilesystemMigrationTests(TransactionTestCase):
+    def test_current_legacy_download_is_preserved_with_its_delivery_proof(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate([('game', '0008_integrated_logcleaner')])
+        try:
+            old = executor.loader.project_state([('game', '0008_integrated_logcleaner')]).apps
+            user = old.get_model('auth', 'User').objects.create(username='download-veteran')
+            slot = old.get_model('game', 'SaveSlot').objects.create(user_id=user.pk, position=1, alias='Archive', active_contract='0-0', mission_state={'recovered': True, 'local_size': 24, 'clean_exit': True})
+            executor = MigrationExecutor(connection)
+            executor.migrate([('game', '0009_saveslot_local_files')])
+            updated = SaveSlot.objects.get(pk=slot.pk)
+            self.assertEqual(updated.local_files[0]['name'], 'research.dat')
+            self.assertEqual(updated.local_files[0]['size'], 24)
+            self.assertEqual(updated.mission_state['local_file_id'], updated.local_files[0]['id'])
+            self.assertNotIn('local_size', updated.mission_state)
+            from .mechanics import execute
+            updated.running_apps = {'terminal': 'terminal'}
+            execute(updated, 'terminal', 'submit')
+            self.assertEqual(updated.completed, 1)
+            self.assertEqual(len(updated.local_files), 1)
+        finally:
+            restore = MigrationExecutor(connection)
+            restore.migrate(restore.loader.graph.leaf_nodes())
+
+
+class LocalDecryptionTests(APIHelpers, TestCase):
+    def setUp(self):
+        user = get_user_model().objects.create_user('local-decrypt')
+        self.client.force_login(user)
+        self.slot = SaveSlot.objects.create(user=user, position=1, alias='Rosetta')
+        self.gain_access('0-1')
+        self.cmd('get ledger.enc')
+        self.clean_exit()
+
+    def test_encrypted_copy_can_be_decrypted_locally_and_submitted_without_reconnecting(self):
+        before = self.refresh()
+        self.assertTrue(before['local_files'][0]['encrypted'])
+        self.assertIn('archive is encrypted', self.cmd('submit')['mission_log'][-1]['text'])
+        self.assertIn('Rosetta license is required', self.cmd('decrypt ledger.enc')['mission_log'][-1]['text'])
+        self.post(self.endpoint('loadout'), {'action': 'buy', 'product_id': 'decryptor-1-standard'})
+        result = self.cmd('decrypt ledger.enc')
+        self.assertIn('decrypted locally', result['mission_log'][-1]['text'])
+        self.assertFalse(result['connected'])
+        self.assertFalse(result['local_files'][0]['encrypted'])
+        self.assertNotIn('decryptor', [app['id'] for app in result['running_apps']])
+        self.assertEqual(result['storage_used'], before['storage_used'])
+        server = self.slot.server_states.get(address='helix-1.internal')
+        self.assertTrue(server.files[0]['encrypted'])
+        self.assertFalse(server.remote_logs)
+        self.assertIn('Delivery verified', self.cmd('submit')['mission_log'][-1]['text'])
+        self.assertEqual(len(self.refresh()['local_files']), 1)
+
+    def test_rosetta_console_supports_local_decryption_and_enforces_funds_capability(self):
+        self.post(self.endpoint('loadout'), {'action': 'buy', 'product_id': 'decryptor-1-standard'})
+        self.launch('decryptor-1-standard')
+        self.slot.refresh_from_db()
+        self.slot.balance = 0
+        self.slot.save()
+        self.assertIn('Insufficient CPH', self.cmd('decrypt ledger.enc', 'decryptor')['mission_log'][-1]['text'])
+        self.slot.refresh_from_db()
+        self.slot.balance = 100
+        self.slot.local_files[0]['security'] = 2
+        self.slot.save()
+        self.assertIn('insufficient', self.cmd('decrypt ledger.enc', 'decryptor')['mission_log'][-1]['text'])
+        self.slot.refresh_from_db()
+        self.slot.local_files[0]['security'] = 1
+        self.slot.save()
+        self.assertIn('decrypted locally', self.cmd('decrypt ledger.enc', 'decryptor')['mission_log'][-1]['text'])
+        self.assertIn('not encrypted', self.cmd('decrypt ledger.enc', 'decryptor')['mission_log'][-1]['text'])

@@ -1,6 +1,8 @@
 """Server-authoritative game simulation. Commands never invoke a shell or network."""
 import math
 import shlex
+from uuid import uuid4
+from pathlib import PurePosixPath
 from datetime import timedelta
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
@@ -18,6 +20,46 @@ from .persistence import (current_target, effective_target, ensure_server, event
 
 class GameError(Exception):
     pass
+
+
+def storage_used(slot):
+    return sum(entry['size'] for entry in slot.local_files)
+
+
+def local_filesystem(slot, verb, args):
+    if verb == 'ls':
+        listing = '\n'.join(f'{entry["name"]}  {entry["size"]} MB  {"encrypted" if entry.get("encrypted") else "readable"}  {entry["source"]}' for entry in slot.local_files) or 'Local directory empty.'
+        return f'LOCAL FILESYSTEM\n{listing}\nStorage: {storage_used(slot)} / {hardware(slot)["storage"]["capacity"]} MB'
+    entry = next((entry for entry in slot.local_files if entry['name'] == args[0]), None)
+    if not entry:
+        raise GameError('Local file not found.')
+    slot.local_files = [item for item in slot.local_files if item['id'] != entry['id']]
+    if slot.mission_state.get('local_file_id') == entry['id']:
+        slot.mission_state.update(recovered=False)
+        slot.mission_state.pop('local_file_id', None)
+        slot.mission_state.pop('local_size', None)
+    return f'{entry["name"]} removed from local storage. Reclaimed {entry["size"]} MB.'
+
+
+def copy_to_local(slot, job):
+    previous = next((entry for entry in slot.local_files if entry['source'] == job['target'] and entry['source_path'] == job['file'] and entry.get('revision', 1) == job.get('server_revision', 1)), None)
+    occupied = storage_used(slot) - (previous['size'] if previous else 0)
+    if occupied + job['size'] > hardware(slot)['storage']['capacity']:
+        raise GameError('Local storage full. Remove local files while disconnected or fit a larger drive.')
+    if previous:
+        name, file_id = previous['name'], previous['id']
+    else:
+        original = PurePosixPath(job['file']).name
+        name, index = original, 2
+        names = {entry['name'] for entry in slot.local_files}
+        while name in names:
+            path = PurePosixPath(original)
+            name = f'{path.stem}_{index}{path.suffix}'
+            index += 1
+        file_id = uuid4().hex
+    entry = dict(id=file_id, name=name, size=job['size'], source=job['target'], source_path=job['file'], revision=job.get('server_revision', 1), encrypted=bool(job['encrypted'] and not slot.mission_state.get('decrypted')), security=job['security'], downloaded_at=timezone.now().isoformat())
+    slot.local_files = [item for item in slot.local_files if item['id'] != file_id] + [entry]
+    return entry
 
 
 def hardware(slot):
@@ -177,15 +219,15 @@ def trade(slot, action, product_id):
             raise GameError('Close applications before fitting this smaller memory module.')
         if category == 'gateway' and len(slot.proxy_route) > item['hops']:
             raise GameError('Shorten your proxy route before fitting this gateway.')
-        if category == 'storage' and slot.mission_state.get('local_size', 0) > item['capacity']:
-            raise GameError('This drive cannot hold your current delivery.')
+        if category == 'storage' and storage_used(slot) > item['capacity']:
+            raise GameError('This drive cannot hold your local files. Remove files or choose a larger drive.')
         slot.equipment = {**slot.equipment, category: product_id}
     else:
         raise GameError('Choose buy, sell, or equip.')
 
 
 MANUALS = {
-    'terminal': 'LOCAL SHELL\nhelp — application manual\nrumors — intercepted hidden-service invitation\njump <host> — use an installed Wraith backdoor\napps — running processes and RAM\ncontracts — broker listings\naccept <contract-id> — reserve by the numeric ID in contracts (0–255)\nbrief — read the accepted brief\nroute — inspect the committed proxy chain\nconnect <host> — dial a fictional target\nscan <host> — scan with owned Cartograph software\nlogcleaner [license-id] — erase remote logs with an owned Logcleaner license\nlockpick — open the server login dialog\nstatus — gateway status\nhistory — recent operator journal for this target\nls — remote file listing\nget <file> — copy a readable file to local storage\nrm <file> — remove a remote file\ndisconnect — end the remote session\nsubmit — deliver evidence to the broker\nabort — abandon the contract (fine and reputation loss)\nclear — clear local console output',
+    'terminal': 'LOCAL SHELL\nhelp — application manual\nrumors — intercepted hidden-service invitation\njump <host> — use an installed Wraith backdoor\napps — running processes and RAM\ncontracts — broker listings\naccept <contract-id> — reserve by the numeric ID in contracts (0–255)\nbrief — read the accepted brief\nroute — inspect the committed proxy chain\nconnect <host> — dial a fictional target\nscan <host> — scan with owned Cartograph software\nlogcleaner [license-id] — erase remote logs with an owned Logcleaner license\nlockpick — open the server login dialog\nstatus — gateway status\nhistory — recent operator journal for this target\ndecrypt <local-file> — decrypt a local archive with owned Rosetta software while disconnected\nls — list local files when disconnected; remote files when logged in\nget <file> — copy a readable file to local storage\nrm <file> — remove a local file when disconnected; a remote file when logged in\ndisconnect — end the remote session\nsubmit — deliver evidence to the broker\nabort — abandon the contract (fine and reputation loss)\nclear — clear local console output',
     'mapper': 'CARTOGRAPH\nscan <host> — inspect a fictional host and its services\nCosts 1 + tool tier CPH. Scan quality depends on tool capability.',
     'cracker': 'LOCKPICK\nOpen the graphical password breaker from Applications. Connect to a server login and scan its authentication service first.',
     'decryptor': 'ROSETTA\ndecrypt <file> — decode an encrypted remote archive\nRequires file access and a sufficient decryption engine.',
@@ -262,6 +304,10 @@ def execute(slot, app, raw):
                 result = 'Unknown bank command. Read help for the bank manual.'
         elif app == 'terminal':
             result = _shell(slot, verb, args, job)
+        elif app == 'decryptor' and not slot.mission_started:
+            if verb != 'decrypt' or len(args) != 1:
+                raise GameError('Use decrypt <local-file>.')
+            result = decrypt_local(slot, args[0])
         elif app == 'mapper':
             if verb != 'scan' or len(args) != 1:
                 raise GameError('Unknown command or arguments for this application. Read help for its manual.')
@@ -390,8 +436,43 @@ def clean_logs(slot, license_id=None):
     return f'{tool["name"]}: Remote access logs erased.'
 
 
+def decrypt_local(slot, name, integrated=False):
+    if slot.mission_started:
+        raise GameError('Disconnect before decrypting a local file. Rosetta can also decrypt remote files in its own console.')
+    entry = next((entry for entry in slot.local_files if entry['name'] == name), None)
+    if not entry:
+        raise GameError('Local file not found.')
+    if not entry.get('encrypted'):
+        raise GameError('This local file is not encrypted.')
+    previous = slot.running_apps
+    if integrated and 'decryptor' not in previous:
+        licenses = [SOFTWARE[key] for key in slot.installed_software if key in SOFTWARE and SOFTWARE[key]['kind'] == 'decryptor']
+        if not licenses:
+            raise GameError('An owned Rosetta license is required for local decryption.')
+        free_ram = hardware(slot)['memory']['ram'] - ram_used(slot)
+        licenses = [tool for tool in licenses if tool['ram'] <= free_ram]
+        if not licenses:
+            raise GameError('Not enough free RAM for Rosetta. Close a tool or use a Micro license.')
+        slot.running_apps = {**previous, 'decryptor': max(licenses, key=lambda tool: (tool['power'], tool['speed']))['id']}
+    try:
+        charged, tool = _tool_work(slot, 'decryptor', 18)
+    finally:
+        slot.running_apps = previous
+    if not charged:
+        raise GameError(tool)
+    if tool['power'] < entry.get('security', 1):
+        raise GameError('Rosetta capability is insufficient for this encrypted local file.')
+    entry['encrypted'] = False
+    entry['decrypted_at'] = timezone.now().isoformat()
+    return f'{name}: decrypted locally. Checksum intact. Local copy is ready for delivery.'
+
+
 def _shell(slot, verb, args, job):
     arity = {'history': 0, 'jump': 1, 'rumors': 0, 'apps': 0, 'contracts': 0, 'accept': 1, 'route': 0, 'status': 0, 'brief': 0, 'abort': 0, 'connect': 1, 'submit': 0, 'disconnect': 0, 'ls': 0, 'get': 1, 'rm': 1}
+    if verb == 'decrypt':
+        if len(args) != 1:
+            raise GameError('Use decrypt <local-file>.')
+        return decrypt_local(slot, args[0], integrated=True)
     if verb == 'scan':
         if len(args) != 1:
             raise GameError('Use scan <host>.')
@@ -423,7 +504,9 @@ def _shell(slot, verb, args, job):
     if verb == 'route' and not args:
         return 'GATEWAY → ' + ' → '.join([get_server(key)['name'] + ' [' + get_server(key)['address'] + ']' for key in slot.proxy_route] + ['TARGET']) + f'\nConnection lease: {route_stats(slot)["fee"]} CPH'
     if verb == 'status' and not args:
-        return f'Balance: {slot.balance} CPH\nRAM: {ram_used(slot)}/{hardware(slot)["memory"]["ram"]} GB\nRemote: {job["target"] if job and slot.mission_started else "disconnected"}\nLocal archive: {job["file"] if job and state.get("recovered") else "empty"}'
+        return f'Balance: {slot.balance} CPH\nRAM: {ram_used(slot)}/{hardware(slot)["memory"]["ram"]} GB\nRemote: {job["target"] if job and slot.mission_started else "disconnected"}\nLocal archive: {len(slot.local_files)} files / {storage_used(slot)} MB'
+    if verb in ('ls', 'rm') and not slot.mission_started:
+        return local_filesystem(slot, verb, args)
     if verb in ('ls', 'get', 'rm'):
         require_login(slot)
     if not job:
@@ -442,7 +525,10 @@ def _shell(slot, verb, args, job):
             raise GameError('No reserved contract to submit.')
         if slot.mission_started:
             raise GameError('Cannot deliver evidence while connected to the target.')
-        fulfilled = state.get('recovered') if job['objective'] == 'retrieve' else state.get('deleted')
+        local_copy = next((entry for entry in slot.local_files if entry['id'] == state.get('local_file_id')), None)
+        if job['objective'] == 'retrieve' and local_copy and local_copy.get('encrypted'):
+            raise GameError('Broker rejected delivery: archive is encrypted. Decrypt the local copy with Rosetta first.')
+        fulfilled = (state.get('recovered') and local_copy) if job['objective'] == 'retrieve' else state.get('deleted')
         if not fulfilled or not state.get('clean_exit'):
             raise GameError('Broker rejected delivery: objective or clean exit evidence missing.')
         transact(slot, job['reward'], f'Contract payment // {public_code(job["id"])}')
@@ -476,14 +562,11 @@ def _shell(slot, verb, args, job):
         if len(args) != 1 or args[0] != job['file'] or not job.get('file_present', True):
             raise GameError('File not found.')
         if verb == 'get':
-            if job['encrypted'] and not state.get('decrypted'):
-                raise GameError('Archive encrypted. Broker cannot accept ciphertext.')
-            if job['size'] > hardware(slot)['storage']['capacity']:
-                raise GameError('Local storage full. Transfer failed.')
+            local = copy_to_local(slot, job)
             record_action(slot, job, 'file_retrieved', f'{job["file"]} copied to local storage.')
-            state.update(recovered=True, local_size=job['size'], dirty=True)
+            state.update(recovered=True, local_file_id=local['id'], dirty=True)
             state['work'] = state.get('work', 0) + math.ceil(job['size'] / hardware(slot)['gateway']['bandwidth'] + state.get('latency', 0) / 10)
-            return f'Copied {job["file"]} to local storage. {job["size"]} MB verified.'
+            return f'Copied {job["file"]} to local storage. {job["size"]} MB verified.\nLocal file: {local["name"]} ({"encrypted" if local['encrypted'] else "readable"}) / drive usage {storage_used(slot)} MB.'
         if verb == 'rm':
             record_action(slot, job, 'file_deleted', f'{job["file"]} removed from the remote filesystem.', delete=True)
             state.update(deleted=True, dirty=True)

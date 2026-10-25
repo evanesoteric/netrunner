@@ -34,6 +34,7 @@ class SaveSlot(models.Model):
     running_apps = models.JSONField(default=dict)
     proxy_route = models.JSONField(default=list)
     atlas_nodes = models.JSONField(default=starter_atlas_nodes)
+    local_files = models.JSONField(default=list)
     mission_state = models.JSONField(default=dict)
     contract_cooldowns = models.JSONField(default=dict)
     completed = models.PositiveIntegerField(default=0)

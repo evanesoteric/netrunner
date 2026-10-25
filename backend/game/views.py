@@ -1,5 +1,7 @@
 import json
 from functools import wraps
+from datetime import timedelta
+from django.utils.dateparse import parse_datetime
 from django.contrib.auth import authenticate, login, logout, get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
@@ -12,7 +14,7 @@ from .world import all_contracts, get_contract, all_servers
 from .models import SaveSlot, LedgerEntry
 from .persistence import current_target
 from .catalog import CURRENCY, RANKS, THRESHOLDS, PRODUCTS, BUILTIN_APPS, HOME_NODE
-from .mechanics import GameError, hardware, ram_used, route_stats, available_at, trace_remaining, settle, launch, trade, validate_route, execute, edit_directory, reserve, fail
+from .mechanics import GameError, hardware, ram_used, route_stats, available_at, trace_remaining, settle, launch, trade, validate_route, execute, edit_directory, reserve, fail, storage_used
 
 def api(methods, authenticated=True):
     def decorate(fn):
@@ -48,7 +50,9 @@ def serialize(slot, detailed=False):
     monitor = PRODUCTS.get(slot.running_apps.get('monitor', ''))
     job = get_contract(slot.active_contract)
     target = current_target(slot)
-    remaining = trace_remaining(slot) if monitor and target and monitor['power'] >= target['security'] else None
+    tracing = trace_remaining(slot)
+    started = slot.mission_state.get('trace_started', slot.mission_started.isoformat() if slot.mission_started else None) if tracing is not None else None
+    remaining = tracing if monitor and target and monitor['power'] >= target['security'] else None
     data = {
         'id': slot.id, 'position': slot.position, 'alias': slot.alias, 'created_at': slot.created_at,
         'balance': slot.balance, 'reputation': slot.reputation, 'rank': slot.rank,
@@ -58,7 +62,9 @@ def serialize(slot, detailed=False):
         'active_contract': public_job(job, mapping),
         'connected': bool(slot.mission_started),
         'authenticated': bool(slot.mission_started and slot.mission_state.get('access')),
-        'trace_active': bool(slot.mission_started and trace_remaining(slot) is not None),
+        'trace_active': tracing is not None,
+        'trace_started_at': started,
+        'trace_deadline': (parse_datetime(started) + timedelta(seconds=slot.mission_state.get('trace_budget', 0) - slot.mission_state.get('work', 0))).isoformat() if started and remaining is not None else None,
         'password_break': slot.mission_state.get('password_break') if slot.mission_started else None,
         'password_result': slot.mission_state.get('password_result') if slot.mission_started else None,
         'login_service': {'port': target['port'], 'security': target['security']} if target and slot.mission_started and slot.mission_state.get('scanned') and slot.mission_state.get('scanned_host') == target['target'] and slot.mission_state.get('scanned_revision', 1) == target.get('server_revision', 1) else None,
@@ -82,6 +88,8 @@ def serialize(slot, detailed=False):
             'workspace_layout': slot.workspace_layout,
             'workspace_revision': slot.workspace_revision,
             'equipment': hardware(slot),
+            'local_files': slot.local_files,
+            'storage_used': storage_used(slot),
             'owned_hardware': slot.owned_hardware,
             'installed_software': slot.installed_software,
             'running_apps': [{
@@ -104,7 +112,7 @@ def serialize(slot, detailed=False):
 @ensure_csrf_cookie
 @api(['GET'], authenticated=False)
 def session(request):
-    return JsonResponse({'user': {'username': request.user.username} if request.user.is_authenticated else None, 'currency': CURRENCY, 'ranks': RANKS, 'version': '0.11.0', 'server_time': timezone.now().isoformat()})
+    return JsonResponse({'user': {'username': request.user.username} if request.user.is_authenticated else None, 'currency': CURRENCY, 'ranks': RANKS, 'version': '0.12.0', 'server_time': timezone.now().isoformat()})
 
 @api(['POST'], authenticated=False)
 def register(request):
@@ -263,7 +271,7 @@ def restart(request, slot_id):
     if request.data.get('confirmation') != slot.alias:
         raise GameError('Type the runner alias exactly to confirm restarting this slot.')
     fresh = SaveSlot(user=request.user, alias=slot.alias, position=slot.position)
-    for field in ['balance', 'reputation', 'completed', 'equipment', 'owned_hardware', 'installed_software', 'running_apps', 'proxy_route', 'atlas_nodes', 'active_contract', 'mission_started', 'mission_state', 'mission_log', 'contract_cooldowns', 'backdoors', 'ransomware_ops', 'remote_host', 'market_unlocked', 'field_notes', 'notes_revision', 'notes_updated_at', 'workspace_layout', 'workspace_revision']:
+    for field in ['balance', 'reputation', 'completed', 'equipment', 'owned_hardware', 'installed_software', 'running_apps', 'proxy_route', 'atlas_nodes', 'active_contract', 'mission_started', 'mission_state', 'local_files', 'mission_log', 'contract_cooldowns', 'backdoors', 'ransomware_ops', 'remote_host', 'market_unlocked', 'field_notes', 'notes_revision', 'notes_updated_at', 'workspace_layout', 'workspace_revision']:
         setattr(slot, field, getattr(fresh, field))
     slot.created_at = timezone.now()
     slot.save()

@@ -90,9 +90,9 @@ onMounted(async () => { resetCompletion(); await scroll(true); if (props.autofoc
 
 <template>
   <section class="panel terminal-panel">
-    <div class="panel-title"><span><Terminal :size="16" /> {{ name.toUpperCase() }}</span><span class="panel-meta">{{ application === 'bank' ? 'CIPHER PRIVATE ACCOUNT' : slot.connected ? 'REMOTE LINK ACTIVE' : 'LOCAL SESSION' }}</span></div>
+    <div class="panel-title"><span><Terminal :size="16" /> {{ name.toUpperCase() }}</span><span class="panel-meta">{{ application === 'bank' ? 'CIPHER PRIVATE ACCOUNT' : slot.connected ? 'REMOTE LINK ACTIVE' : application === 'terminal' ? `LOCAL DRIVE ${slot.storage_used} / ${slot.equipment.storage.capacity} MB` : 'LOCAL SESSION' }}</span></div>
     <div ref="output" class="terminal-log" role="log" :aria-label="`${application} output`" @pointerup="focusOutput" @scroll="trackScroll">
-      <div class="terminal-banner">NETRUNNER / {{ application.toUpperCase() }} [v0.11]<br>{{ application === 'terminal' ? (slot.authenticated ? `Remote shell / admin@${slot.remote_target}.` : 'Local shell ready. Launch separate tools from Applications.') : 'Application process ready.' }} Type help for its reference manual.<br>─────────────────────────────────────────────────────</div>
+      <div class="terminal-banner">NETRUNNER / {{ application.toUpperCase() }} [v0.12]<br>{{ application === 'terminal' ? (slot.authenticated ? `Remote shell / admin@${slot.remote_target}.` : 'Local shell ready. Launch separate tools from Applications.') : 'Application process ready.' }} Type help for its reference manual.<br>─────────────────────────────────────────────────────</div>
       <pre v-for="(entry, i) in entries" :key="i">{{ entry.text }}</pre>
       <span v-if="busy" class="terminal-muted" role="status">PROCESSING…</span>
     </div>

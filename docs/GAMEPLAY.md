@@ -8,6 +8,20 @@ Scrolling up pauses automatic following. Polls and newly arriving output leave y
 
 Run `scan <host>` directly in the main terminal with an owned Cartograph license. It uses the running Cartograph version if present, otherwise the strongest owned version that fits free RAM. The same compute costs, security checks, trace effects, and service fingerprints apply. A terminal scan does not leave a mapper process running, so the Cartograph panel can stay closed. The separate Cartograph application remains available with its existing console.
 
+## Local filesystem and decryption
+
+When disconnected, `ls` lists the files on your workstation and its used/total storage. `rm <file>` deletes a local copy and reclaims its space. While connected, those commands refer to the remote server and require login. The terminal prompt identifies whether you are at the local workstation or logged into a target.
+
+`get <file>` saves a durable local copy, including encrypted archives such as `ledger.enc`. Downloads survive disconnects, submission, failures, sign-out, and reloads. A drive must fit the combined size of all local files. Re-downloading the same server revision replaces its existing copy; same-named files from different servers receive unique local names. Submission retains the file, so clean up copies when you no longer need them. Removing a delivery file before submission invalidates its evidence.
+
+For encrypted recovery, download the archive, clean the remote logs, and disconnect. Then run `decrypt ledger.enc` in the primary terminal with an owned Rosetta license, or launch Rosetta and use its console. Local decryption checks funds, RAM, and software capability; it changes only the local copy. The broker accepts it after decryption and a clean disconnect. Rosetta also retains its existing remote-decryption capability. Local filenames can be completed with Tab.
+
+## Sidebar services and public proxies
+
+Atlas, Cipher bank, the contract broker, and Hardware & software open their full pages from the sidebar, including when leaving Workspace. The exchange remains available from Applications and as a Workspace panel too.
+
+The directory includes 40 additional Ghost-accessible public servers: libraries, universities, transit networks, museums, civic archives, and telecommunications services. Add chosen servers to Atlas before routing through them. They have distinct fees, trace delays, and latency; gateway hop limits still apply. They are ordinary proxy/exploration servers, not ransomware opportunities.
+
 ## Graphical password breaker
 
 Connect to a server from the local terminal and scan its authentication service with Cartograph. **Open password breaker**, or type `lockpick` in the terminal, to open the server-login modal. Lockpick also remains available through Applications and Workspace.
@@ -18,21 +32,21 @@ The server controls decoding time using CPU speed, Lockpick speed, target securi
 
 ## Trace tracker
 
-A fixed floating bar keeps the target and trace status visible across pages. Before login it shows an inactive trace; Wraith links show suppressed logging. A running, sufficiently capable Tripwire reveals the countdown and progress meter. The bar turns red at 30 seconds remaining. Without a suitable monitor, it shows that the timer is unavailable rather than inventing a countdown.
+A fixed floating bar keeps the target and trace status visible across pages. Before login it shows an inactive trace; Wraith links show suppressed logging. A running, sufficiently capable Tripwire reveals the countdown and progress meter. The bar turns red at 30 seconds remaining. Without a suitable monitor, it ticks elapsed time since login and explains that remaining time needs Tripwire. The HUD sits above login modals and stays readable while the background is blurred. The countdown uses a server deadline, so it continues ticking between polls or during a temporary polling interruption.
 
 ## Integrated Logcleaner
 
 Buy Logcleaner Pro or Micro licenses at the exchange. In the primary terminal, select an owned license and click **Clean logs**, or enter `logcleaner [license-id]`. Omitting the ID selects the strongest owned version that fits free RAM. Cleanup requires login, enough compute funds and temporary free RAM, and sufficient software capability. It leaves no separate process running. Subsequent remote work can dirty the logs again.
 
-Software purchases show a brief build animation and completion notice. This is a presentation of the completed purchase; skipping it does not refund or cancel the license.
+Software purchases show a brief build animation and completion notice. Fitting hardware, including gateways, shows installation progress, diagnostics or link calibration, and a fitting-complete notice. This is a presentation of the completed purchase; skipping an animation does not refund or undo the completed purchase or fitting.
 
 ## Operator desktop
 
 - **Persistent terminal focus:** Enter and button submissions keep the command input focused, including failed requests. Up/Down recalls command history. Output can still be selected, and Tab can leave the terminal.
-- **Independent launchers:** the top bar launches the local terminal; the sidebar opens Atlas, the broker, and Cipher bank; the application launcher also starts the exchange and each installed tool. Running processes use graphical interfaces or their own consoles and share your machine's RAM. Closing a window does not disconnect a remote session.
+- **Independent launchers:** the top bar launches the local terminal; the sidebar opens Atlas, the broker, and Cipher bank; the exchange has its own sidebar shortcut and is also available through the application launcher. Running processes use graphical interfaces or their own consoles and share your machine's RAM. Closing a window does not disconnect a remote session.
 - **Custom machines:** 40 named hardware products across five tiers: two processors, gateways, memory modules, and drives per tier. Hardware purchases enter inventory and must be fitted. Spare components can be sold at half price.
 - **Specialized software:** 50 individual licenses: Cartograph network mappers, Lockpick authentication crackers, Rosetta decryptors, Logcleaner terminal extensions, and Tripwire trace monitors. Each has five capability classes and Pro/Micro variants. Micro trades speed for lower memory use. Applications launch separately; Logcleaner runs inside the primary terminal.
-- **World routing:** Atlas contains named fictional servers at 12 map locations. Select an ordered proxy chain, reorder/remove hops, and commit it. The route is drawn from your home gateway through the proxies to the reserved target. Pan and zoom the map or use the accessible saved-server list. Routes remain committed across sessions.
+- **World routing:** Atlas contains named fictional servers and dozens of public-access proxies worldwide. Select an ordered proxy chain, reorder/remove hops, and commit it. The route is drawn from your home gateway through the proxies to the reserved target. Pan and zoom the map or use the accessible saved-server list. Routes remain committed across sessions.
 - **Manual contracts:** reserve with the broker or local shell, then submit through the shell. The broker publishes target, artifact, objective, clearance, and reward. There are retrieval, encrypted recovery, and deletion jobs at each rank.
 - **An economy with consequences:** routing leases and tool computation consume Cipher (CPH). Failed jobs cost up to `90 + 80 × job rank` CPH and 60 reputation (both balances floor at zero). Completed jobs return after five minutes; failed ones after ten, using server time. A bankrupt runner can sell spare equipment or explicitly restart that slot by typing their alias.
 
@@ -48,10 +62,10 @@ Each console has its own `help` manual. Commands run entirely inside the game's 
 
 | Application | Commands / purpose |
 | --- | --- |
-| Local terminal | `apps`, `contracts`, `accept <id>`, `brief`, `route`, `connect <host>`, `lockpick`, `scan <host>`, `logcleaner [license-id]`, `status`, `ls`, `get <file>`, `rm <file>`, `disconnect`, `submit`, `abort`, `clear` |
+| Local terminal | `apps`, `contracts`, `accept <id>`, `brief`, `route`, `connect <host>`, `lockpick`, `scan <host>`, `logcleaner [license-id]`, `decrypt <file>`, `status`, `ls`, `get <file>`, `rm <file>`, `disconnect`, `submit`, `abort`, `clear` |
 | Cartograph | `scan <host>` discovers authentication ports and archive metadata |
 | Lockpick | Graphical password breaker: scan a server, connect to its login, then click **Break password** |
-| Rosetta | `decrypt <file>` operates on an accessible encrypted archive |
+| Rosetta | `decrypt <file>` in its console supports remote archives or local files while disconnected; the primary terminal also supports local decryption |
 | Logcleaner | `logcleaner [license-id]` in the local terminal removes remote access logs |
 | Tripwire | `trace` reads the live trace; keep a capable monitor running for the desktop countdown |
 | Cipher bank | `balance`, `history` display this save's independent account |

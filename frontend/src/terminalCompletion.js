@@ -1,6 +1,6 @@
 // Completion only offers commands and names already available to this runner.
 const commands = {
-  terminal: ['abort', 'accept', 'apps', 'brief', 'clear', 'connect', 'contracts', 'disconnect', 'get', 'help', 'history', 'jump', 'lockpick', 'logcleaner', 'login', 'ls', 'rm', 'route', 'rumors', 'scan', 'status', 'submit'],
+  terminal: ['abort', 'accept', 'apps', 'brief', 'clear', 'connect', 'contracts', 'decrypt', 'disconnect', 'get', 'help', 'history', 'jump', 'lockpick', 'logcleaner', 'login', 'ls', 'rm', 'route', 'rumors', 'scan', 'status', 'submit'],
   mapper: ['help', 'scan'], decryptor: ['decrypt', 'help'], monitor: ['help', 'trace'],
   bank: ['balance', 'help', 'history'], rootkit: ['help', 'install'], ransomware: ['deploy', 'help'],
 }
@@ -22,9 +22,9 @@ export function completion(text, cursor, app, slot) {
     if (verb === 'accept') pool = (slot.contracts || []).map(job => String(job.id))
     if (verb === 'logcleaner') pool = (slot.installed_software || []).filter(id => id.startsWith('cleaner-'))
     if (['get', 'rm', 'decrypt'].includes(verb)) {
-      pool = [slot.active_contract?.file]
+      pool = !slot.connected && ['rm', 'decrypt'].includes(verb) ? (slot.local_files || []).map(file => file.name) : [slot.active_contract?.file]
       const host = slot.remote_target || slot.active_contract?.target
-      for (const entry of slot.mission_log || []) {
+      for (const entry of (!slot.connected && ['rm', 'decrypt'].includes(verb) ? [] : slot.mission_log) || []) {
         if (host && entry.text.startsWith(`Host: ${host}\n`)) {
           const file = entry.text.match(/^Archive: (.*?) \/ /m)?.[1]
           if (file && file !== 'missing') pool.push(file)

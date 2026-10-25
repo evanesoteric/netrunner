@@ -17,7 +17,7 @@ import FieldNotes from './components/FieldNotes.vue'
 import ServerHistory from './components/ServerHistory.vue'
 import NetworkMap from './components/NetworkMap.vue'
 
-const loginDialog = ref(false), buildProduct = ref(null)
+const loginDialog = ref(false), buildProduct = ref(null), buildMode = ref('software')
 const workspaceRef = ref(null)
 const user = ref(null), slot = ref(null), saves = ref([]), page = ref('overview'), loading = ref(true), busy = ref(false), error = ref(''), notice = ref('')
 const authMode = ref('register'), username = ref(''), password = ref(''), alias = ref(''), now = ref(Date.now()), selectedPosition = ref(1)
@@ -30,6 +30,7 @@ const nav = computed(() => [
   { id: 'broker', label: 'Contract broker', icon: BriefcaseBusiness },
   { id: 'bank', label: 'Cipher bank', icon: Landmark },
   { id: 'atlas', label: 'Atlas network', icon: Globe },
+  { id: 'exchange', label: 'Hardware & software', icon: Cpu },
   { id: 'launcher', label: 'Applications', icon: Grid2X2 },
   { id: 'notes', label: 'Field Notes', icon: NotebookPen },
   { id: 'history', label: 'Server Histories', icon: Activity },
@@ -39,7 +40,9 @@ const nav = computed(() => [
 ].filter(item => item.visible !== false))
 const money = n => new Intl.NumberFormat('en-US').format(n ?? 0)
 const progress = computed(() => slot.value?.next_rank_at ? Math.min(100, (slot.value.reputation - slot.value.rank_floor) / (slot.value.next_rank_at - slot.value.rank_floor) * 100) : 100)
-const remaining = computed(() => slot.value?.trace_remaining == null ? null : Math.max(0, slot.value.trace_remaining - Math.floor((now.value - responseTime.value) / 1000)))
+const serverNow = computed(() => now.value + (slot.value?.server_time ? Date.parse(slot.value.server_time) - responseTime.value : 0))
+const remaining = computed(() => slot.value?.trace_deadline ? Math.max(0, Math.ceil((Date.parse(slot.value.trace_deadline) - serverNow.value) / 1000)) : null)
+const elapsed = computed(() => slot.value?.trace_started_at ? Math.max(0, Math.floor((serverNow.value - Date.parse(slot.value.trace_started_at)) / 1000)) : 0)
 const cooled = job => job.available_at && Date.parse(job.available_at) > now.value + serverOffset
 const cooldown = job => Math.max(0, Math.ceil((Date.parse(job.available_at) - now.value - serverOffset) / 1000))
 const currentProcess = computed(() => slot.value?.running_apps.find(app => app.id === activeConsole.value))
@@ -95,9 +98,13 @@ async function logOut() {
 }
 async function navigate(item) {
   if (item.id === 'saves') return openSaves()
-  if (['broker', 'bank', 'atlas'].includes(item.id)) {
-    if (slot.value.running_apps.some(app => app.id === item.id)) activate(item.id)
-    else await launchApplication(item.id)
+  const application = { broker: 'broker', bank: 'bank', atlas: 'atlas', exchange: 'market' }[item.id]
+  if (application) {
+    await act(async () => {
+      if (!slot.value.running_apps.some(app => app.id === application)) updateSlot(await api(`slots/${slot.value.id}/applications/`, { action: 'launch', product_id: application }))
+      activeConsole.value = application
+      page.value = item.id
+    })
   } else page.value = item.id
 }
 function activate(app) {
@@ -161,7 +168,7 @@ async function contractAction(action, job) {
   })
 }
 async function trade(action, productId) {
-  await act(async () => { const product = [...slot.value.catalog, ...slot.value.black_market_catalog].find(item => item.id === productId); updateSlot(await api(`slots/${slot.value.id}/loadout/`, { action, product_id: productId })); if (action === 'buy' && product?.category === 'software') buildProduct.value = product; notice.value = action === 'buy' ? (product?.kind === 'cleaner' ? 'Logcleaner installed in the primary terminal.' : 'Purchase complete. Hardware must be fitted; software is available in Applications.') : action === 'sell' ? 'Product sold. Payment recorded in your ledger.' : 'Component fitted.' })
+  await act(async () => { const product = [...slot.value.catalog, ...slot.value.black_market_catalog].find(item => item.id === productId); updateSlot(await api(`slots/${slot.value.id}/loadout/`, { action, product_id: productId })); if (action === 'buy' && product?.category === 'software') { buildMode.value = 'software'; buildProduct.value = product } else if (action === 'equip' && product) { buildMode.value = 'hardware'; buildProduct.value = product }; notice.value = action === 'buy' ? (product?.kind === 'cleaner' ? 'Logcleaner installed in the primary terminal.' : 'Purchase complete. Hardware must be fitted; software is available in Applications.') : action === 'sell' ? 'Product sold. Payment recorded in your ledger.' : 'Component fitted.' })
 }
 async function saveRoute(nodes) {
   await act(async () => { updateSlot(await api(`slots/${slot.value.id}/route/`, { nodes })); notice.value = 'Proxy chain committed. Connection leases are charged when dialing a target.' })
@@ -194,7 +201,7 @@ onUnmounted(() => { clearInterval(clock); clearInterval(poller) })
   <div class="app-shell" :inert="loginDialog || !!buildProduct">
     <aside class="sidebar">
       <a class="brand" href="#" @click.prevent="page = 'overview'" aria-label="Netrunner home"><span class="brand-icon"><Terminal :size="23" /></span><span>netrunner<span class="brand-dot">_</span><small>INDEPENDENT NETWORK ACCESS</small></span></a>
-      <div class="workspace-label">WORKSPACE <span>V.0.11</span></div>
+      <div class="workspace-label">WORKSPACE <span>V.0.12</span></div>
       <nav aria-label="Main navigation">
         <button v-for="item in nav" :key="item.id" :aria-label="item.label" :class="['nav-item', { active: page === item.id }]" @click="navigate(item)" :disabled="!slot || busy" :aria-current="page === item.id ? 'page' : undefined"><component :is="item.icon" :size="18" /><span>{{ item.label }}</span><span v-if="item.id === 'broker' && slot" class="nav-count">{{ slot.contracts.length }}</span><span v-if="item.id === 'terminal' && slot?.active_contract" class="live-dot"></span></button>
       </nav>
@@ -229,7 +236,6 @@ onUnmounted(() => { clearInterval(clock); clearInterval(poller) })
         </template>
 
         <template v-else>
-          <TraceTracker :slot="slot" :remaining="remaining" />
           <div v-if="slot.running_apps.length" class="application-dock" aria-label="Running applications"><div v-for="app in slot.running_apps" :key="app.id" :class="{ selected: activeConsole === app.id && !['overview', 'launcher', 'workspace'].includes(page) }"><button @click="activate(app.id)"><span class="green-dot"></span>{{ app.name }}</button><button :aria-label="`Stop ${app.name}`" :disabled="busy" @click="closeApplication(app.id)"><X :size="12" /></button></div></div>
           <template v-if="page === 'overview'">
             <div class="eyebrow"><span class="live-dot"></span> PERSONAL DESKTOP / SLOT 0{{ slot.position }}</div>
@@ -261,12 +267,13 @@ onUnmounted(() => { clearInterval(clock); clearInterval(poller) })
           <KeepAlive><WorkspaceView v-if="page === 'workspace'" ref="workspaceRef" :key="`${user.username}:${slot.id}:${slot.created_at}`" :slot="slot" :username="user.username" :busy="busy" :api="api" :send="sendCommand" :launch="(product, id) => launchApplication(product, true, id)" :close="(app, id) => closeApplication(app, true, id)" :now="now" :offset="serverOffset" :ranks="ranks" :breaker-action="breakerAction" @open-cracker="openCracker" @route="saveRoute" @directory="editDirectory" @trade="trade" @contract="contractAction" @jump="jumpBackdoor" /></KeepAlive>
           <KeepAlive><FieldNotes v-if="page === 'notes'" :key="`${user.username}:${slot.id}:${slot.created_at}`" :slot-id="slot.id" :username="user.username" :api="api" /></KeepAlive>
           <section v-if="slot.ransomware_ops.length" class="panel ransomware-panel"><div class="panel-title"><span>ECLIPSE / ACTIVE INSTANCES</span><span class="panel-meta">{{ slot.ransomware_ops.length }} / 3</span></div><div v-for="operation in slot.ransomware_ops" :key="operation.target" class="ransomware-row"><code>{{ operation.target }}</code><span>{{ Math.max(0, Math.ceil((Date.parse(operation.due_at) - now - serverOffset) / 1000)) }}s</span><strong>{{ operation.reward }} CPH</strong></div></section>
-          <div v-if="restartOpen" class="modal-backdrop" @click.self="restartOpen = false"><section class="panel restart-dialog" role="dialog" aria-modal="true" aria-labelledby="restart-title"><div class="panel-title"><span>RUNNER RESTART</span><button class="icon-button" @click="restartOpen = false" aria-label="Cancel restart"><X :size="17" /></button></div><form @submit.prevent="restartRunner"><h2 id="restart-title">Start over in slot 0{{ slot.position }}?</h2><p>This erases {{ slot.alias }}'s balance, reputation, contracts, equipment, routes, notes, server histories, workspace arrangement, and transaction history. Your account and other save slots stay intact.</p><label for="restart-confirmation">TYPE {{ slot.alias }} TO CONFIRM</label><input id="restart-confirmation" v-model="restartConfirmation" autocomplete="off" required /><div class="dialog-actions"><button type="button" class="button secondary" @click="restartOpen = false">Cancel</button><button class="button primary" :disabled="busy || restartConfirmation !== slot.alias">Erase progress and restart</button></div></form></section></div>
+          <div v-if="restartOpen" class="modal-backdrop" @click.self="restartOpen = false"><section class="panel restart-dialog" role="dialog" aria-modal="true" aria-labelledby="restart-title"><div class="panel-title"><span>RUNNER RESTART</span><button class="icon-button" @click="restartOpen = false" aria-label="Cancel restart"><X :size="17" /></button></div><form @submit.prevent="restartRunner"><h2 id="restart-title">Start over in slot 0{{ slot.position }}?</h2><p>This erases {{ slot.alias }}'s balance, reputation, contracts, equipment, routes, local files, notes, server histories, workspace arrangement, and transaction history. Your account and other save slots stay intact.</p><label for="restart-confirmation">TYPE {{ slot.alias }} TO CONFIRM</label><input id="restart-confirmation" v-model="restartConfirmation" autocomplete="off" required /><div class="dialog-actions"><button type="button" class="button secondary" @click="restartOpen = false">Cancel</button><button class="button primary" :disabled="busy || restartConfirmation !== slot.alias">Erase progress and restart</button></div></form></section></div>
         </template>
         <footer><span>NETRUNNER <span class="footer-slash">/</span> A WORLD BEHIND THE FIREWALL</span><span>FICTIONAL NETWORK. INDEPENDENT OPERATORS.<span class="green-dot"></span></span></footer>
       </main>
     </div>
   </div>
+  <Teleport to="body"><TraceTracker v-if="user && slot" :slot="slot" :remaining="remaining" :elapsed="elapsed" /></Teleport>
   <ModalDialog v-if="loginDialog && slot" title="Remote system login" :restore-focus="false" @close="closeLoginDialog"><PasswordBreaker :slot="slot" :busy="busy" :action="breakerAction" modal @exit="closeLoginDialog" /></ModalDialog>
-  <BuildSplash v-if="buildProduct" :product="buildProduct" @close="buildProduct = null" />
+  <BuildSplash v-if="buildProduct" :product="buildProduct" :mode="buildMode" @close="buildProduct = null" />
 </template>

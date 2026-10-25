@@ -2,6 +2,12 @@
 
 Historical feature and migration notes. See the [README](../README.md) for the current project overview and [development guide](DEVELOPMENT.md) for setup and maintenance.
 
+## v0.12 — local workstation, visible traces, and public directory
+
+The trace HUD now ticks elapsed time without Tripwire, uses a server deadline for monitored countdowns, and stays above login modals. Local files persist and consume aggregate drive space: use disconnected `ls`/`rm`, download ciphertext, and decrypt it locally with Rosetta before submission. Hardware fittings have their own installation animation. Sidebar services open full pages from Workspace, with a dedicated hardware/software shortcut. Atlas gains 40 public-access proxies available to Ghost players.
+
+Migration `0009` preserves the current recoverable legacy download and its delivery proof. Older builds discarded previously submitted copies; those cannot be reconstructed. Local files are included in PostgreSQL backups and reset only when the save is restarted or the development database is reset.
+
 ## v0.11 — terminal completion and optional Cartograph panel
 
 Terminals preserve scrollback during polls and new output, with an explicit jump to latest output. Tab supports prefix completion, fuzzy fallback, and contextual arguments. The main terminal can run Cartograph scans using owned software while the separate app remains available. Logged-out file commands now identify the missing login explicitly.

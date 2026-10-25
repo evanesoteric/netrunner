@@ -4,6 +4,7 @@ import uuid
 from django.conf import settings
 from django.core.management import BaseCommand, CommandError
 from django.db import transaction, connection
+from game.services import SERVICES, service_fields
 from game.models import DirectoryServer, GeneratedMission, ContractIdentity
 
 
@@ -14,6 +15,7 @@ class Command(BaseCommand):
         parser.add_argument('kind', choices=['missions', 'servers'])
         parser.add_argument('--count', type=int, default=1)
         parser.add_argument('--rank', type=int, choices=range(5), default=0)
+        parser.add_argument('--service', choices=list(SERVICES), help='Choose a service fingerprint family; otherwise vary services randomly.')
         parser.add_argument('--objective', choices=['retrieve', 'delete'], help='Choose a mission objective instead of random selection.')
         parser.add_argument('--encrypted', action='store_true', help='Generate encrypted retrieval missions.')
         parser.add_argument('--exploitable', action='store_true', help='Mark generated servers as ransomware targets.')
@@ -42,13 +44,14 @@ class Command(BaseCommand):
         created = []
         for index in range(count):
             token = uuid.uuid4().hex
+            service = service_fields(options['service'] or rng.choice(list(SERVICES)))
             x, y = rng.randint(110, 900), rng.randint(90, 390)
             name = f'{rng.choice(["Vesper", "Halcyon", "Nimbus", "Aster", "Cobalt"])} {rng.choice(["Archive", "Logistics", "Research", "Systems"])}'
             if options['kind'] == 'servers':
                 key, address = 'srv-' + token, 'node-' + token[:16] + '.internal'
                 data = dict(id=key, name=f'{name}: {token[:6].upper()}', operator=name, address=address,
                             category='Opportunity' if options['exploitable'] else 'Infrastructure', location='Off-grid',
-                            short_name=name.upper(), x=x, y=y, rank=rank, security=rank + 1,
+                            short_name=name.upper(), x=x, y=y, rank=rank, security=rank + 1, **service,
                             fee=rng.randint(3, 12), delay=rng.randint(14, 42), latency=rng.randint(4, 18),
                             exploitable=options['exploitable'], ransom_reward=800 + rank * 200)
                 DirectoryServer.objects.create(key=key, address=address, data=data)
@@ -61,7 +64,7 @@ class Command(BaseCommand):
                 description = f'{"Recover" if objective == "retrieve" else "Remove"} {filename} from {address}. Leave no access logs and submit proof through the broker.'
                 data = dict(id=key, target=address, title=f'{name} // {token[:6].upper()}', client='Independent broker',
                             rank=rank, security=rank + 1, objective=objective, file=filename, encrypted=encrypted,
-                            port=443 if encrypted else 22, size=24 + rank * 32, reward=220 + rank * 200 + rng.randrange(0, 100, 10),
+                            **service, size=24 + rank * 32, reward=220 + rank * 200 + rng.randrange(0, 100, 10),
                             reputation=35 + rank * 10, description=description, x=x, y=y)
                 GeneratedMission.objects.create(key=key, data=data)
                 ContractIdentity.objects.create(template_key=key, code=allocated[index])

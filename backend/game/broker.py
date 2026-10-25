@@ -3,13 +3,14 @@ from datetime import timedelta
 from pathlib import PurePosixPath
 from uuid import uuid4
 from secrets import choice
+from .services import SERVICES, service_fields
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
 
 def offered_jobs(slot):
     from .world import all_contracts
-    return [job for job in all_contracts(slot) if job['id'] not in slot.broker_consumed and abs(job['rank'] - slot.rank) <= 1][:24]
+    return [job for job in all_contracts(slot) if job['id'] not in slot.broker_consumed and abs(job['rank'] - slot.rank) <= 1][:48]
 
 
 def ensure_tickets(slot):
@@ -55,6 +56,7 @@ def settle_broker(slot):
                'file': f'{path.stem}_{nonce[:6]}{path.suffix}',
                'title': f'{["Lumen","Redwood","Silverline","Arcadia"][int(nonce[0],16)%4]} dossier {nonce[:6]} // {template["objective"]}',
                'x': 220 + int(nonce[1:4],16)%640, 'y': 120 + int(nonce[4:7],16)%230}
+        job.update(service_fields(list(SERVICES)[int(nonce[7:9], 16) % len(SERVICES)]))
         job['description'] = f'{"Recover" if job["objective"] == "retrieve" else "Delete"} {job["file"]} from {job["target"]}. Leave no remote access logs and deliver proof through the broker.' + (' The archive is encrypted.' if job['encrypted'] else '')
         slot.broker_jobs = {**slot.broker_jobs, job['id']: job}
         changed = True

@@ -59,7 +59,7 @@ Stop with **Ctrl+C**, then `docker compose down`. Start again with `docker compo
 
 ## Core features
 
-- **Manual hacking:** scan targets, crack authentication, retrieve or delete files, clean remote logs, and submit proof for payment.
+- **Manual hacking:** tackle SSH, WordPress, PHP, RDP, SIP and other services using Lockpick or optional fingerprint exploits; retrieve or delete files, clean logs, and submit proof for payment.
 - **Proxy routing:** discover dozens of public-access proxies and chain named servers on Atlas to buy trace time, balancing connection costs and latency.
 - **Custom rigs:** choose hardware and individual software licenses; manage working RAM, local storage, and applet capabilities.
 - **Contracts and rank:** rise from Ghost to Architect. Jobs are available at your rank, one above, and one below. Failed contracts carry financial and reputation penalties.

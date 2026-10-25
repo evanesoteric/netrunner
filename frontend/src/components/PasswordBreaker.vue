@@ -25,7 +25,7 @@ onBeforeUnmount(() => clearInterval(timer))
 </script>
 <template>
   <section class="panel password-breaker" aria-label="Lockpick password breaker">
-    <div class="panel-title"><span><KeyRound :size="16" /> {{ tool?.name || 'LOCKPICK' }}</span><span class="panel-meta">SERVER LOGIN</span></div>
+    <div class="panel-title"><span><KeyRound :size="16" /> {{ tool?.name || 'LOCKPICK' }}</span><span class="panel-meta">{{ slot.login_service?.name || 'SERVER LOGIN' }}</span></div>
     <form class="decoder-display" :class="{ working: attempt }" @submit.prevent="run('login')">
       <div class="decoder-meta"><span>{{ slot.connected ? `${slot.remote_target}${port ? ':' + port : ''}` : 'NO REMOTE CONNECTION' }}</span><span>CLASS {{ product?.power }} / {{ tool?.ram }} GB</span></div>
       <label :for="`${id}-license`">LOCKPICK LICENSE</label><select :id="`${id}-license`" v-model="selected" aria-label="Lockpick license" :disabled="busy || !!attempt || ready"><option v-for="license in licenses" :key="license.id" :value="license.id">{{ license.name }}</option></select>

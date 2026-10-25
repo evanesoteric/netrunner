@@ -1,4 +1,6 @@
 """The fictional world's public product, relay, and contract catalogs."""
+from .services import service_fields
+
 CURRENCY = {'name': 'Cipher', 'symbol': 'CPH'}
 RANKS = ['Ghost', 'Signal', 'Operator', 'Spectre', 'Architect']
 THRESHOLDS = [0, 100, 250, 450, 700]
@@ -111,7 +113,20 @@ for tier, (client, target, family, location) in enumerate([
     ('Free Signal', 'citadel', 'Citadel evidence', (635, 160)),
     ('The Collective', 'oracle', 'Oracle intelligence', (825, 320)),
 ]):
-    for index, (objective, encrypted) in enumerate([('retrieve', False), ('retrieve', True), ('delete', False)]):
-        filename = ['research.dat', 'ledger.enc', 'audit.log'][index]
-        CONTRACTS.append({'id': f'{tier}-{index}', 'rank': tier, 'title': f'{family} // {"sealed archive" if encrypted else "quiet removal" if objective == "delete" else "recovery"}', 'client': client, 'target': f'{target}-{index}.internal', 'reward': 220 + tier * 200 + index * 80, 'reputation': 35 + tier * 10, 'description': f'{"Remove" if objective == "delete" else "Recover"} {filename} from {target}-{index}.internal. {"The archive is encrypted. " if encrypted else ""}Leave no remote access logs and deliver proof through the broker.', 'objective': objective, 'file': filename, 'encrypted': encrypted, 'security': tier + 1, 'port': 443 if encrypted else 22, 'size': 24 + tier * 32 + (16 if encrypted else 0), 'x': location[0] + index * 8, 'y': location[1] + index * 8})
+    assignments = [
+        ('retrieve', False, 'ssh', 'research.dat'),
+        ('retrieve', True, 'http', 'ledger.enc'),
+        ('delete', False, 'ssh', 'audit.log'),
+        ('retrieve', False, 'wordpress', 'cms-backup.dat'),
+        ('retrieve', False, 'php', 'legacy-source.dat'),
+        ('retrieve', False, 'rdp', 'desktop-archive.dat'),
+        ('retrieve', False, 'sip', 'call-records.dat'),
+        ('delete', False, 'telnet', 'session-audit.log'),
+        ('retrieve', False, 'ftp', 'transfer-manifest.dat'),
+        ('delete', False, 'smtp', 'mail-audit.log'),
+        ('retrieve', False, 'mysql', 'customer-export.dat'),
+        ('retrieve', False, 'redis', 'cache-snapshot.dat'),
+    ]
+    for index, (objective, encrypted, service, filename) in enumerate(assignments):
+        CONTRACTS.append({'id': f'{tier}-{index}', 'rank': tier, 'title': f'{family} // {"sealed archive" if encrypted else "quiet removal" if objective == "delete" else "recovery"}', 'client': client, 'target': f'{target}-{index}.internal', 'reward': 220 + tier * 200 + (index % 3) * 80, 'reputation': 35 + tier * 10, 'description': f'{"Remove" if objective == "delete" else "Recover"} {filename} from {target}-{index}.internal. {"The archive is encrypted. " if encrypted else ""}Leave no remote access logs and deliver proof through the broker.', 'objective': objective, 'file': filename, 'encrypted': encrypted, 'security': tier + 1, **service_fields(service), 'size': 24 + tier * 32 + (16 if encrypted else 0), 'x': location[0] + (index % 3) * 8, 'y': location[1] + (index % 3) * 8})
 CONTRACT_BY_ID = {job['id']: job for job in CONTRACTS}

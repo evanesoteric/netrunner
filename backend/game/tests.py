@@ -144,7 +144,7 @@ class SimulationTests(APIHelpers, TestCase):
         listed = self.refresh()
         self.assertEqual(listed['rank_name'], 'Ghost')
         self.assertEqual({job['rank'] for job in listed['contracts']}, {0, 1})
-        self.assertEqual(len(listed['contracts']), 6)
+        self.assertEqual(len(listed['contracts']), 24)
         for job in listed['contracts']:
             with self.subTest(contract_id=job['id']):
                 SaveSlot.objects.filter(pk=self.slot.pk).update(active_contract='', mission_state={})
@@ -173,8 +173,8 @@ class SimulationTests(APIHelpers, TestCase):
         first = self.refresh()['contracts']
         self.assertEqual(first, self.refresh()['contracts'])
         numbers = list(ContractIdentity.objects.values_list('code', flat=True))
-        self.assertEqual(len(numbers), 15)
-        self.assertEqual(len(set(numbers)), 15)
+        self.assertEqual(len(numbers), 60)
+        self.assertEqual(len(set(numbers)), 60)
         self.assertTrue(all(0 <= number <= 255 for number in numbers))
         self.assertTrue(all(job['id'].isdigit() for job in first))
 
@@ -783,7 +783,7 @@ class DevelopmentDatabaseLifecycleTests(TestCase):
                 self.assertEqual(query("SELECT to_regclass('lifecycle_probe')"), [(None,)])
                 # Prove the schema and migration history were recreated, not merely flushed.
                 self.assertEqual(query('SELECT count(*) FROM auth_user'), [(0,)])
-                self.assertEqual(query('SELECT count(*) FROM game_contractidentity'), [(15,)])
+                self.assertEqual(query('SELECT count(*) FROM game_contractidentity'), [(len(CONTRACT_BY_ID),)])
                 run(restore, '-d', name, '--clean', '--if-exists', '--no-owner', '--no-acl', '--exit-on-error', '--single-transaction', str(root / 'snapshot.dump'))
                 build.write_text('build-three')
                 run(sys.executable, str(manage), 'prepare_dev', '--preserve')
@@ -819,7 +819,7 @@ class GeneratedWorldTests(APIHelpers, TestCase):
         self.assertEqual(len(set(job['target'] for job in jobs)), 3)
         self.assertEqual(len(set(public_code(job['id']) for job in jobs)), 3)
         listed = self.refresh()['contracts']
-        self.assertEqual(len(listed), 9)
+        self.assertEqual(len(listed), 27)
         for job in jobs:
             response = self.reserve(public_code(job['id']))
             self.assertEqual(response['active_contract']['target'], job['target'])
@@ -1843,7 +1843,7 @@ class FreshBrokerTests(APIHelpers, TestCase):
     def test_accept_removes_offer_and_due_replacement_has_new_identity_target_and_artifact(self):
         original = next(job for job in self.refresh()['contracts'] if job['target']=='helix-0.internal')
         accepted = self.reserve()
-        self.assertEqual(len(accepted['contracts']),5)
+        self.assertEqual(len(accepted['contracts']),23)
         self.assertNotIn(original['target'],[job['target'] for job in accepted['contracts']])
         self.slot.refresh_from_db()
         self.slot.broker_pending[0]['due_at']=(timezone.now()-timedelta(seconds=1)).isoformat()
@@ -1853,7 +1853,7 @@ class FreshBrokerTests(APIHelpers, TestCase):
         self.assertNotEqual(new['file'], original['file'])
         self.assertNotEqual(new['id'], original['id'])
         self.assertEqual(updated['active_contract']['target'], original['target'])
-        self.assertEqual(len(self.refresh()['contracts']),6)
+        self.assertEqual(len(self.refresh()['contracts']),24)
         self.slot.refresh_from_db()
         self.assertEqual(len(self.slot.broker_jobs),1)
 
@@ -2208,3 +2208,158 @@ class IrcExploitTests(APIHelpers, TestCase):
         self.assertEqual(len(old.irc_messages), 200)
         self.assertGreaterEqual(old.irc_state['chat_tick'], 5 * 24 * 60 * 6)
         self.assertEqual(old.balance, 1200)
+
+
+class ExpandedServiceTests(APIHelpers, TestCase):
+    def setUp(self):
+        user = get_user_model().objects.create_user('service-runner')
+        self.client.force_login(user)
+        self.slot = SaveSlot.objects.create(user=user, position=1, alias='Services')
+
+    def test_every_service_has_a_starter_affordable_contract_without_exploits(self):
+        from .services import SERVICES
+        seen = set()
+        jobs = [job for job in CONTRACT_BY_ID.values() if job['rank'] == 0 and not job['encrypted']]
+        for job in jobs:
+            with self.subTest(service=job['service'], contract=job['id']):
+                # Each case starts with a normal runner's starter funding and tools.
+                self.post(self.endpoint('restart'), {'confirmation': 'Services'})
+                self.reserve(job['id'])
+                data = self.cmd(f'scan {job["target"]}')
+                self.assertIn('Lockpick admin login / matching exploit optional', data['mission_log'][-1]['text'])
+                self.cmd(f'connect {job["target"]}')
+                data = self.cmd(f'crack {job["port"]}')
+                self.assertTrue(data['authenticated'])
+                self.cmd(f'{"get" if job["objective"] == "retrieve" else "rm"} {job["file"]}')
+                self.clean_exit()
+                data = self.cmd('submit')
+                self.assertIn('Delivery verified', data['mission_log'][-1]['text'])
+                self.assertGreater(data['balance'], 1200)
+                self.assertEqual(data['exploits'], [])
+                self.assertEqual(data['completed'], 1)
+                seen.add(job['service'])
+        # Plain HTTP is the existing encrypted archive contract; all new service
+        # families have a complete starter-only path, including WordPress and PHP.
+        self.assertEqual(seen, set(SERVICES) - {'http'})
+
+    def test_all_services_have_matching_exploits_and_generic_http_cannot_match_apps(self):
+        from .exploits import catalog, fingerprint
+        from .services import SERVICES, service_fields
+        self.slot.balance = 10000
+        self.slot.running_apps = {'terminal': 'terminal'}
+        self.slot.save()
+        offers = catalog(self.slot)
+        for key, entry in SERVICES.items():
+            with self.subTest(service=key):
+                if key == 'http':
+                    # Existing encrypted target can be entered without buying Rosetta.
+                    job = CONTRACT_BY_ID['0-1']
+                else:
+                    job = next(job for job in CONTRACT_BY_ID.values() if job['rank'] == 0 and job['service'] == key)
+                offer = next(item for item in offers if item['protocol'] == entry['protocol'] and item['version'] == 1 and item['mode'] == 'shot')
+                self.post(self.endpoint('irc'), {'command': f'/buy {offer["id"]}'})
+                self.reserve(job['id'])
+                self.cmd(f'connect {job["target"]}')
+                self.cmd(f'scan {job["target"]}')
+                data = self.cmd(f'exploit {offer["id"]}')
+                self.assertTrue(data['authenticated'], data['mission_log'][-1]['text'])
+                self.assertEqual(data['exploits'], [])
+                self.clean_exit()
+                self.cmd('abort')
+        self.assertNotEqual(fingerprint(dict(port=443, security=1)), fingerprint(dict(security=1, **service_fields('wordpress'))))
+        self.assertNotEqual(fingerprint(dict(security=1, **service_fields('wordpress'))), fingerprint(dict(security=1, **service_fields('php'))))
+
+    def test_same_port_wrong_application_and_wrong_release_preserve_the_exploit(self):
+        self.slot.balance = 10000
+        self.slot.save()
+        self.post(self.endpoint('irc'), {'command': '/buy http-v1-r1-shot'})
+        self.post(self.endpoint('irc'), {'command': '/buy wordpress-6.4-v1-r1-shot'})
+        self.reserve('0-3')
+        self.cmd('connect helix-3.internal')
+        self.cmd('scan helix-3.internal')
+        data = self.cmd('exploit http-v1-r1-shot')
+        self.assertFalse(data['authenticated'])
+        self.assertIn('WordPress CMS 6.4', data['mission_log'][-1]['text'])
+        self.assertEqual(len(data['exploits']), 2)
+        server = self.slot.server_states.get(address='helix-3.internal')
+        server.descriptor['service_version'] = '6.5'
+        server.save()
+        self.cmd('scan helix-3.internal')
+        data = self.cmd('exploit wordpress-6.4-v1-r1-shot')
+        self.assertFalse(data['authenticated'])
+        self.assertEqual(len(data['exploits']), 2)
+        self.assertIn('WordPress CMS 6.5', data['mission_log'][-1]['text'])
+        offers = self.client.get(f'/api/{self.endpoint("irc")}/').json()['irc']['offers']
+        self.assertTrue(any(item['id'] == 'wordpress-6.5-v1-r1-shot' for item in offers))
+        self.post(self.endpoint('irc'), {'command': '/buy wordpress-6.5-v1-r1-shot'})
+        self.assertTrue(self.cmd('exploit wordpress-6.5-v1-r1-shot')['authenticated'])
+
+    def test_service_identity_and_release_survive_maintenance_and_new_scans(self):
+        from .persistence import settle_world
+        self.reserve('0-3')
+        self.cmd('scan helix-3.internal')
+        server = self.slot.server_states.get(address='helix-3.internal')
+        server.maintenance_due = timezone.now() - timedelta(seconds=1)
+        server.save()
+        self.slot.refresh_from_db()
+        settle_world(self.slot)
+        self.cmd('connect helix-3.internal')
+        data = self.cmd('scan helix-3.internal')
+        self.assertIn('WordPress CMS 6.4 / auth-v1 / patch r2', data['mission_log'][-1]['text'])
+        self.assertIn('8443/tcp', data['mission_log'][-1]['text'])
+        offers = self.client.get(f'/api/{self.endpoint("irc")}/').json()['irc']['offers']
+        self.assertTrue(any(item['id'] == 'wordpress-6.4-v1-r2-shot' for item in offers))
+
+    def test_directory_and_contract_briefs_disclose_service_names(self):
+        from .services import SERVICES
+        data = self.refresh()
+        self.assertEqual({job['service'] for job in data['contracts']}, set(SERVICES))
+        self.assertTrue(all(job['service_name'] for job in data['contracts']))
+        directory = data['network_directory']
+        self.assertTrue(all(node['service_name'] for node in directory))
+        self.assertTrue(set(SERVICES).issubset({node.get('service') for node in directory}))
+
+    @override_settings(DEBUG=True)
+    def test_offline_generator_can_choose_each_service_for_missions_and_servers(self):
+        from .services import SERVICES
+        from .models import GeneratedMission, DirectoryServer
+        for key, entry in SERVICES.items():
+            call_command('generate_content', 'missions', count=1, service=key, objective='retrieve', stdout=StringIO())
+            call_command('generate_content', 'servers', count=1, service=key, stdout=StringIO())
+        jobs = list(GeneratedMission.objects.values_list('data', flat=True))
+        nodes = list(DirectoryServer.objects.filter(key__startswith='srv-').values_list('data', flat=True))
+        self.assertEqual({job['service'] for job in jobs}, set(SERVICES))
+        self.assertEqual({node['service'] for node in nodes}, set(SERVICES))
+        self.assertTrue(all(job['port'] == SERVICES[job['service']]['port'] for job in jobs))
+
+    def test_unknown_ports_do_not_silently_become_ssh_exploit_targets(self):
+        from .services import fingerprint
+        self.assertEqual(fingerprint(dict(port=9999, security=1))['protocol'], 'UNKNOWN')
+
+    def test_existing_lifetime_ssh_licenses_without_release_field_still_work(self):
+        self.post(self.endpoint('irc'), {'command': '/buy ssh-v1-r1-license'})
+        self.slot.refresh_from_db()
+        self.slot.exploit_inventory['ssh-v1-r1-license'].pop('release')
+        self.slot.save()
+        self.reserve('0-0')
+        self.cmd('connect helix-0.internal')
+        self.cmd('scan helix-0.internal')
+        self.assertTrue(self.cmd('exploit ssh-v1-r1-license')['authenticated'])
+
+
+    def test_directory_keeps_the_service_profile_of_an_existing_discovered_server(self):
+        from .world import target_for_server, get_server
+        from .persistence import ensure_server
+        target = target_for_server(get_server('public-09'))
+        target.pop('service')
+        target.pop('service_version')
+        target['port'] = 443  # An HTTP server discovered before profile expansion.
+        ensure_server(self.slot, target)
+        data = self.refresh()
+        node = next(node for node in data['network_directory'] if node['id'] == 'public-09')
+        self.assertEqual(node['service_name'], 'HTTP')
+        self.assertEqual(node['service'], 'http')
+        self.launch('terminal')
+        self.cmd('connect atlantic-port.internal')
+        data = self.cmd('scan atlantic-port.internal')
+        self.assertIn('Fingerprint: HTTP / auth-v1 / patch r1', data['mission_log'][-1]['text'])

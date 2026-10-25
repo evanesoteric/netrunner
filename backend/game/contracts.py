@@ -1,5 +1,6 @@
 """Persisted public contract numbers; catalog template keys are private."""
 from .models import ContractIdentity
+from .services import service_name
 
 
 def codes(slot=None):
@@ -11,7 +12,7 @@ def public_job(job, mapping=None):
     if job is None:
         return None
     mapping = codes() if mapping is None else mapping
-    return {**job, 'id': str(mapping[job['id']])}
+    return {**job, 'service_name': service_name(job), 'id': str(mapping[job['id']])}
 
 
 def public_code(key, slot=None):

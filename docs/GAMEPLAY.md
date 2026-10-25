@@ -153,3 +153,28 @@ Exploit execution needs 2 GB of free RAM for the command, a current scan, and an
 Ambient conversations use the local [`irc_chatter.json`](../backend/game/data/irc_chatter.json) library: 62 nicknames, 48 authored three-person conversations, and 12 conversation templates with software, platform, project, editor, reaction and outcome pools. Deterministic shuffling spreads topics across a cycle; shared template values keep each three-line exchange coherent. No model, external chat server, news API or background worker is needed. Add conversations or expand the vocabulary pools in that file, then restart Django to load changes.
 
 Chat continues while you use other pages. The shared game clock advances the channel, and idle pages refresh every ten seconds. Both the saved transcript and the browser's message list retain the **latest 200 messages**, dropping the oldest automatically; reaching 200 never stops chat or wipes the whole channel. `/clear` (also a channel button) clears saved chat for the current save across sessions. Inventory and bank history remain intact. Separate delivery cursors prevent cleared or pruned messages from replaying. A new channel starts with a short recent conversation history. After a longer absence, the server fills the latest 200 messages (150 chatter lines and 50 exploit drops) rather than replaying the entire absence. Chat timestamps follow server time even across sign-out or a closed browser; there is no need for a separate worker. IRC polling stops when its page closes, while the shared game refresh continues on other pages. Requests do not overlap.
+
+
+## Service families and optional exploits
+
+Contract targets and public directory servers now include eleven service families:
+
+| Service | Default port / transport | Example exploit ID |
+| --- | --- | --- |
+| SSH | 22 / TCP | `ssh-v1-r1-shot` |
+| HTTP | 443 / TCP | `http-v1-r1-shot` |
+| RDP remote desktop | 3389 / TCP | `rdp-v1-r1-shot` |
+| WordPress CMS 6.4 | 443 / TCP | `wordpress-6.4-v1-r1-shot` |
+| PHP 5.6 | 443 / TCP | `php-5.6-v1-r1-shot` |
+| VOIP / SIP 2.0 | 5060 / UDP | `sip-2.0-v1-r1-shot` |
+| Telnet | 23 / TCP | `telnet-v1-r1-shot` |
+| FTP | 21 / TCP | `ftp-v1-r1-shot` |
+| SMTP mail | 25 / TCP | `smtp-v1-r1-shot` |
+| MySQL 5.7 | 3306 / TCP | `mysql-5.7-v1-r1-shot` |
+| Redis 6.2 | 6379 / TCP | `redis-6.2-v1-r1-shot` |
+
+These are fictional service profiles and simulated access adapters, not real vulnerability or exploit implementations. Each service supports the same **scan → Lockpick → admin login** route. Paid exploits remain optional shortcuts. The service name does not increase the authentication class or require a different cracker purchase. All new Ghost-level service contracts are unencrypted and can be completed with starter software and funding; higher classes still need appropriately capable tools as before. Exploit prices continue to use the existing class/revision formula.
+
+The broker has 60 built-in contract templates, including the original 15. A fresh Ghost sees 24 offers across Ghost and Signal. Briefs show the service family and available access routes. Replacement jobs vary their service family while retaining the source contract's security class, objective and payout. Generated content can also select any supported service.
+
+Scans reveal the full fingerprint, including application release, authentication class and patch revision. **An HTTP exploit does not match WordPress or PHP just because all three use port 443.** A WordPress 6.4 license does not match a 6.5 service. IRC's service filter lists each family; scanning a different release or later patch adds matching intelligence to the trade board. Owned legacy SSH, HTTP and RDP licenses keep working on their matching fingerprints. Existing discovered server profiles remain durable across reconnects and updates.

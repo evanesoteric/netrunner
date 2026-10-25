@@ -13,6 +13,7 @@ from .contracts import codes, public_job
 from .world import all_contracts, get_contract, all_servers
 from .models import SaveSlot, LedgerEntry
 from .persistence import current_target
+from .services import service_name
 from .catalog import CURRENCY, RANKS, THRESHOLDS, PRODUCTS, BUILTIN_APPS, HOME_NODE
 from .mechanics import GameError, hardware, ram_used, route_stats, available_at, trace_remaining, settle, launch, trade, validate_route, execute, edit_directory, reserve, fail, storage_used, monitor_tool, select_applet
 
@@ -69,7 +70,7 @@ def serialize(slot, detailed=False):
         'trace_deadline': (parse_datetime(started) + timedelta(seconds=slot.mission_state.get('trace_budget', 0) - slot.mission_state.get('work', 0))).isoformat() if started and remaining is not None else None,
         'password_break': slot.mission_state.get('password_break') if slot.mission_started else None,
         'password_result': slot.mission_state.get('password_result') if slot.mission_started else None,
-        'login_service': {'port': target['port'], 'security': target['security']} if target and slot.mission_started and slot.mission_state.get('scanned') and slot.mission_state.get('scanned_host') == target['target'] and slot.mission_state.get('scanned_revision', 1) == target.get('server_revision', 1) else None,
+        'login_service': {'port': target['port'], 'security': target['security'], 'name': service_name(target)} if target and slot.mission_started and slot.mission_state.get('scanned') and slot.mission_state.get('scanned_host') == target['target'] and slot.mission_state.get('scanned_revision', 1) == target.get('server_revision', 1) else None,
         'remote_target': target['target'] if target and slot.mission_started else None,
         'stealth_session': bool(slot.remote_host.get('_backdoor')),
         'remote_node': {key: target[key] for key in ('target', 'x', 'y')} if target and slot.mission_started else None,
@@ -119,7 +120,7 @@ def serialize(slot, detailed=False):
 @ensure_csrf_cookie
 @api(['GET'], authenticated=False)
 def session(request):
-    return JsonResponse({'user': {'username': request.user.username} if request.user.is_authenticated else None, 'currency': CURRENCY, 'ranks': RANKS, 'version': '0.15.1', 'server_time': timezone.now().isoformat()})
+    return JsonResponse({'user': {'username': request.user.username} if request.user.is_authenticated else None, 'currency': CURRENCY, 'ranks': RANKS, 'version': '0.16.0', 'server_time': timezone.now().isoformat()})
 
 @api(['POST'], authenticated=False)
 def register(request):

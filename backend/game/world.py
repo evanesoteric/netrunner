@@ -2,6 +2,7 @@
 from .catalog import CONTRACTS, CONTRACT_BY_ID, RELAYS, RELAY_BY_ID
 from .models import DirectoryServer, GeneratedMission
 from .public_servers import PUBLIC_SERVERS, PUBLIC_BY_ID
+from .services import service_name, service_key, service_fields, SERVICES
 
 
 def all_contracts(slot=None):
@@ -21,7 +22,18 @@ def get_contract(key, slot=None):
 
 def all_servers(slot=None):
     entries = RELAYS + PUBLIC_SERVERS + [row.data for row in DirectoryServer.objects.order_by('key')]
-    return [entry for entry in entries if not entry.get('hidden') or (slot and slot.market_unlocked)]
+    known = {address: {**descriptor, 'port': port} for address, descriptor, port in slot.server_states.values_list('address', 'descriptor', 'port')} if slot else {}
+    result = []
+    for entry in entries:
+        if entry.get('hidden') and not (slot and slot.market_unlocked):
+            continue
+        profile = known.get(entry['address'], entry)
+        key = service_key(profile)
+        fields = service_fields(key) if key in SERVICES else {}
+        result.append({**entry, **fields, 'port': profile.get('port', fields.get('port', 22)),
+                       'service_version': profile.get('service_version', fields.get('service_version', '')),
+                       'service_name': service_name(profile)})
+    return result
 
 
 def get_server(key):

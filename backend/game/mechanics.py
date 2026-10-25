@@ -400,10 +400,12 @@ def scan_target(slot, address):
     observe(server)
     from .exploits import fingerprint, fingerprint_text
     service = fingerprint_text(fingerprint(target))
+    from .services import SERVICES, service_key, UNKNOWN_SERVICE
+    transport = SERVICES.get(service_key(target), UNKNOWN_SERVICE)['transport']
     event(server, 'scanned', f'Service fingerprint observed: port {target["port"]}, revision {server.revision}.')
     server.save()
     state.update(scanned_revision=server.revision, scanned=True, scanned_host=target['target'])
-    return f'Host: {target["target"]}\n{target["port"]}/tcp  OPEN  auth-v{target["security"]} / patch r{target.get("server_revision", 1)}\nArchive: {target["file"] if target.get("file_present", True) else "missing"} / {target["size"]} MB / {"encrypted" if target["encrypted"] else "plaintext"}\nFingerprint: {service}\nOther ports: filtered. Scan complete.'
+    return f'Host: {target["target"]}\n{target["port"]}/{transport}  OPEN  auth-v{target["security"]} / patch r{target.get("server_revision", 1)}\nArchive: {target["file"] if target.get("file_present", True) else "missing"} / {target["size"]} MB / {"encrypted" if target["encrypted"] else "plaintext"}\nFingerprint: {service}\nAccess: Lockpick admin login / matching exploit optional.\nOther ports: filtered. Scan complete.'
 
 
 def clean_logs(slot, license_id=None):

@@ -3,6 +3,7 @@ from datetime import timedelta
 from django.utils import timezone
 from .models import ServerState, ServerEvent
 from .world import session_target
+from .services import service_key, SERVICES, UNKNOWN_SERVICE
 
 MAINTENANCE_SECONDS = 600
 
@@ -34,7 +35,9 @@ def effective_target(slot, target):
     if not server:
         return target
     artifact = server.files[0] if server.files else None
-    return {**target, 'security': server.security, 'port': server.port,
+    key = service_key(server.descriptor)
+    return {**target, 'service': key, 'service_version': server.descriptor.get('service_version', SERVICES.get(key, UNKNOWN_SERVICE)['release']),
+            'security': server.security, 'port': server.port,
             'file': artifact['name'] if artifact else target['file'],
             'encrypted': artifact['encrypted'] if artifact else target['encrypted'],
             'file_present': bool(artifact and artifact['present']), 'server_revision': server.revision}
@@ -45,7 +48,8 @@ def current_target(slot):
 
 
 def observe(server):
-    server.observed = dict(revision=server.revision, port=server.port, security=server.security,
+    key = service_key(server.descriptor)
+    server.observed = dict(service=key, service_version=server.descriptor.get('service_version', SERVICES.get(key, UNKNOWN_SERVICE)['release']), revision=server.revision, port=server.port, security=server.security,
                            files=server.files, at=timezone.now().isoformat())
 
 

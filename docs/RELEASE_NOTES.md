@@ -2,6 +2,10 @@
 
 Historical feature and migration notes. See the [README](../README.md) for the current project overview and [development guide](DEVELOPMENT.md) for setup and maintenance.
 
+## v0.16 — diverse services without mandatory exploit costs
+
+Expanded to eleven service families: SSH, HTTP, RDP, WordPress CMS, PHP 5, VOIP/SIP, Telnet, FTP, SMTP, MySQL and Redis. Added 45 built-in contracts, service labels in briefs and the directory, UDP-aware SIP scan output, and service variation in replacement assignments. Every new Ghost service contract is playable with starter software through Lockpick; paid exploits remain optional and retain existing pricing rules. IRC now offers permanent and single-use exploits for every family, matching application release as well as auth class and patch revision. Generic HTTP packets cannot unlock WordPress or PHP targets. Existing discovered server identities and legacy exploit licenses remain valid. The offline generator accepts `--service` for both contracts and directory servers. No schema migration is required; startup migration hooks allocate IDs for the additional templates.
+
 ## v0.15.1 — continuous background IRC
 
 IRC advances through the shared game clock on every page, including an idle desktop. Long absences now fill the latest 200 messages instead of a small catch-up batch, with generation bounded to the history window. Reaching 200 keeps replacing the oldest lines; chat never stops or automatically wipes itself. `/clear` still preserves purchases and delivery cursors. Idle pages refresh every ten seconds without adding an IRC workstation process or consuming game RAM.

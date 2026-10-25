@@ -168,6 +168,8 @@ bash scripts/generate-content.sh missions --count 5 --rank 0
 bash scripts/generate-content.sh missions --count 2 --rank 1 --objective retrieve --encrypted
 bash scripts/generate-content.sh servers --count 5 --rank 0
 bash scripts/generate-content.sh servers --count 4 --rank 0 --exploitable
+bash scripts/generate-content.sh missions --count 3 --rank 0 --service wordpress
+bash scripts/generate-content.sh servers --count 3 --rank 0 --service sip
 docker compose up -d --no-build
 ```
 
@@ -187,6 +189,8 @@ docker compose stop backend
 .\scripts\generate-content.ps1 missions --count 2 --rank 1 --objective retrieve --encrypted
 .\scripts\generate-content.ps1 servers --count 5 --rank 0
 .\scripts\generate-content.ps1 servers --count 4 --rank 0 --exploitable
+.\scripts\generate-content.ps1 missions --count 3 --rank 0 --service wordpress
+.\scripts\generate-content.ps1 servers --count 3 --rank 0 --service sip
 docker compose up -d --no-build
 ```
 
@@ -194,3 +198,6 @@ Ranks are 0 Ghost through 4 Architect. Each call creates unique server addresses
 
 Generated content lives in PostgreSQL and is included in normal `pg_dump` archives. Development database resets erase it along with accounts; back it up before another fresh build. These commands generate new content without changing or deleting existing content.
 
+
+
+The offline generator's `--service` option accepts `ssh`, `http`, `rdp`, `wordpress`, `php`, `sip`, `telnet`, `ftp`, `smtp`, `mysql`, and `redis`. Omitting it randomly selects a supported service. Ports and application release banners come from `backend/game/services.py`. Adding a new family there makes it available to the generator and IRC; authored contract assignments live in `backend/game/catalog.py`. Persistent discovered servers keep their saved service identity. Service profiles model fictional game access, not real vulnerabilities.

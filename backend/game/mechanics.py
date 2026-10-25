@@ -8,13 +8,13 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from .catalog import (
     BUILTIN_APPS, FAILURE_COOLDOWN, HARDWARE,
-    PRODUCTS, SOFTWARE, SUCCESS_COOLDOWN, HOME_NODE, RANKS,
+    PRODUCTS, SOFTWARE, HOME_NODE, RANKS,
 )
 from .models import LedgerEntry
 from .contracts import codes, public_code
 from .world import all_contracts, get_contract, get_server, session_target
 from .persistence import (current_target, effective_target, ensure_server, event, observe,
-                          settle_world, record_action, record_failure, record_contract,
+                          settle_world, record_action, record_failure,
                           sync_remote_logs, clear_remote_logs)
 
 
@@ -155,7 +155,12 @@ def fail(slot, reason):
         return
     record_failure(slot, job, reason)
     contract_failure = bool(slot.active_contract)
-    fine = min(slot.balance + slot.reserve_balance, 90 + job['rank'] * 80)
+    detected = reason != 'Assignment abandoned.'
+    amount = 90 + job['rank'] * 80
+    if detected:
+        from .mailbox import open_case
+        open_case(slot, target_name(job), amount, reason)
+    fine = 0 if detected else min(slot.balance + slot.reserve_balance, amount)
     if fine:
         description = f'Contract failure // {public_code(slot.active_contract, slot)}' if contract_failure else f'Intrusion failure // {job["target"]}'
         current_payment = min(slot.balance, fine)
@@ -168,16 +173,24 @@ def fail(slot, reason):
         slot.contract_cooldowns = {**slot.contract_cooldowns, slot.active_contract: (timezone.now() + timedelta(seconds=FAILURE_COOLDOWN)).isoformat()}
     from .broker import delay_replacement
     delay_replacement(slot, slot.active_contract)
-    slot.active_contract = ''
+    from .assignments import remove
+    if contract_failure:
+        from .mailbox import incoming, BROKER
+        assignment = slot.assignments.filter(key=slot.active_contract).first()
+        incoming(slot, BROKER, 'Assignment closed // unsuccessful', reason + '\nThis assignment has been withdrawn.', kind='contract_failed', assignment=assignment)
+    remove(slot, 'failed')
     slot.remote_host = {}
     slot.mission_started = None
     slot.mission_state = {}
     outcome = 'Contract lost.' if contract_failure else 'Remote link lost.'
     refresh = ' Broker sourcing updated; this assignment will not return.' if contract_failure else ''
-    log(slot, 'terminal', f'{reason}\n{outcome} Fine {fine} CPH. Reputation −60 (floor 0).{refresh}')
+    penalty = f'Settlement demand {amount} CPH. Check Email; pay through Cipher Bank and confirm by reply.' if detected else f'Fine {fine} CPH.'
+    log(slot, 'terminal', f'{reason}\n{outcome} {penalty} Reputation −60 (floor 0).{refresh}')
 
 
 def settle(slot):
+    from .assignments import ensure_legacy
+    ensure_legacy(slot)
     from .operations import settle_ransomware
     settle_ransomware(slot)
     from .passwords import settle_break
@@ -293,7 +306,7 @@ def trade(slot, action, product_id):
 MANUALS = {
     'filesystem': 'VIRTUAL REMOTE FILESYSTEM\nls [path] — list a directory (2s trace work)\ncd [path] — change directory (1s); cd alone returns to /\npwd — current directory\ncat <path> — preview text (1s)\nfind <filename-or-glob> — search the current subtree (8s)\nget <path> — download any file; only the exact objective path produces proof\nrm <path> — delete one file; directories cannot be deleted\nUse absolute /paths or relative paths, including .. . Local ls, rm and decrypt work while disconnected. Browsing adds work to the running trace; logs still need cleanup.',
     'exploit': 'FINGERPRINT EXPLOITS\nBuy licenses or single-use copies in IRC Underground with CPH.\nexploits — list owned fingerprint tools\nexploit <id> — use on the connected, freshly scanned server\nMatch protocol, auth version and patch revision exactly. Uses 2 GB transient RAM.\nA lifetime license is reusable for that fingerprint; single-use copies burn on successful entry only.\nSuccess opens an admin shell immediately, starts a trace and leaves access logs. Clean logs before disconnecting.',
-    'terminal': 'LOCAL SHELL\nexploits — list owned fingerprint exploits\nexploit <id> — instant shell using a matching exploit from IRC Underground\napplets — list owned terminal software\nuse <license-id> — select an applet version\ntrace — licensed Tripwire telemetry\ninstall — install owned Wraith rootkit\ndeploy <host> — deploy owned Eclipse ransomware\nhelp — application manual\nrumors — intercepted hidden-service invitation\njump <host> — use an installed Wraith backdoor\napps — running processes and RAM\ncontracts — broker listings\naccept <contract-id> — reserve by the numeric ID in contracts (0–255)\nbrief — read the accepted brief\nroute — inspect the committed proxy chain\nping <IP-or-name> — resolve and check simulated connectivity\nresolve <name> — look up a known server address\nconnect <IP-or-name> — dial a fictional target\nscan <host> — scan with owned Cartograph software\nlogcleaner [license-id] — erase remote logs with an owned Logcleaner license\nlockpick — open the server login dialog\nstatus — gateway status\nhistory — recent operator journal for this target\ndecrypt <local-file> — decrypt a local archive with owned Rosetta software while disconnected\nls [path] — list local files or a remote directory\ncd [path] — change remote directory\npwd — print remote working directory\ncat <path> — preview a remote text file\nfind <filename> — search under the current remote directory (8s trace work)\nget <file> — copy a readable file to local storage\nrm <file> — remove a local file when disconnected; a remote file when logged in\ndisconnect — end the remote session\nsubmit — deliver evidence to the broker\nabort — abandon the contract (fine and reputation loss)\nclear — clear local console output',
+    'terminal': 'LOCAL SHELL\nexploits — list owned fingerprint exploits\nexploit <id> — instant shell using a matching exploit from IRC Underground\napplets — list owned terminal software\nuse <license-id> — select an applet version\ntrace — licensed Tripwire telemetry\ninstall — install owned Wraith rootkit\ndeploy <host> — deploy owned Eclipse ransomware\nhelp — application manual\nrumors — intercepted hidden-service invitation\njump <host> — use an installed Wraith backdoor\napps — running processes and RAM\ncontracts — broker listings\naccept <contract-id> — reserve by the numeric ID in contracts (0–255)\nassignments — list up to ten accepted contracts\nselect <id> — select a saved assignment while disconnected\nbrief — read the selected brief\nroute — inspect the committed proxy chain\nping <IP-or-name> — resolve and check simulated connectivity\nresolve <name> — look up a known server address\nconnect <IP-or-name> — dial a fictional target\nscan <host> — scan with owned Cartograph software\nlogcleaner [license-id] — erase remote logs with an owned Logcleaner license\nlockpick — open the server login dialog\nstatus — gateway status\nhistory — recent operator journal for this target\ndecrypt <local-file> — decrypt a local archive with owned Rosetta software while disconnected\nls [path] — list local files or a remote directory\ncd [path] — change remote directory\npwd — print remote working directory\ncat <path> — preview a remote text file\nfind <filename> — search under the current remote directory (8s trace work)\nget <file> — copy a readable file to local storage\nrm <file> — remove a local file when disconnected; a remote file when logged in\ndisconnect — end the remote session\nsubmit — send an email delivery with objective attachment to the broker\nabort — abandon the contract (fine and reputation loss)\nclear — clear local console output',
     'mapper': 'CARTOGRAPH\nscan <host> — inspect a fictional host and its services\nCosts 1 + tool tier CPH. Scan quality depends on tool capability.',
     'cracker': 'LOCKPICK\nUse login in the primary terminal to open the password decoder. Connect to a server login and scan its authentication service first.',
     'decryptor': 'ROSETTA\ndecrypt <file> — decode an encrypted remote archive\nRequires file access and a sufficient decryption engine.',
@@ -301,13 +314,17 @@ MANUALS = {
     'monitor': 'TRIPWIRE\ntrace — inspect the active trace\nAn owned capable license decodes the embedded trace countdown; no separate process is needed.',
     'rootkit': 'WRAITH // EPIC\ninstall — persist a backdoor on the currently mounted server. Clean initial logs before leaving.\nFuture jump <host> connections bypass proxies and logs.',
     'ransomware': 'ECLIPSE // EPIC\ndeploy <host> — install on the currently mounted amber non-contract server. Maximum 3 instances; payout after 120 seconds; each instance then removes itself.',
-    'bank': 'CIPHER BANK\nbalance — current, reserve and loan balances\nhistory [page] — full transaction history, 15 entries per page\nloan [amount] — view terms or borrow CPH with a fixed 5% fee\nrepay <amount> — partial or full loan repayment from current funds\ndeposit <amount> — transfer current funds to reserve\nwithdraw <amount> — transfer reserve funds to current\nOne active loan; no compounding or automatic charges. Trace fines can collect from both cash accounts.',
+    'bank': 'CIPHER BANK\nbalance — current, reserve and loan balances\nhistory [page] — full transaction history, 15 entries per page\nloan [amount] — view terms or borrow CPH with a fixed 5% fee\nrepay <amount> — partial or full loan repayment from current funds\ndeposit <amount> — transfer current funds to reserve\nwithdraw <amount> — transfer reserve funds to current\nOne active loan; no compounding or automatic charges. Agency settlements are paid manually from current funds on the bank page; confirm by Email. Abort penalties can collect from current and reserve.',
 }
 
 
 def reserve(slot, contract_id):
-    if slot.active_contract or slot.mission_started:
-        raise GameError('An assignment or remote session is already open.')
+    from .assignments import LIMIT, ensure_legacy
+    ensure_legacy(slot)
+    if slot.enforcement_cases.exclude(status='closed').exists():
+        raise GameError('Contract reservations suspended. Pay and confirm agency notices in Email first.')
+    if slot.assignments.filter(status='accepted').count() >= LIMIT:
+        raise GameError('You may accept up to 10 contracts at a time.')
     from .broker import offered_jobs
     mapping = codes(slot)
     eligible = offered_jobs(slot)
@@ -323,12 +340,17 @@ def reserve(slot, contract_id):
     ready = available_at(slot, key)
     if ready and ready > timezone.now():
         raise GameError('The broker is still sourcing a replacement assignment. Check its availability time.')
+    if slot.assignments.filter(key=key).exists():
+        raise GameError('That assignment was already accepted and cannot be reserved again.')
     from .broker import consume
     consume(slot, job)
-    slot.active_contract = key
-    slot.remote_host = {}
-    slot.mission_state = {}
-    slot.mission_started = None
+    from .models import Assignment
+    from .assignments import focus
+    from .mailbox import briefing
+    assignment = Assignment.objects.create(slot=slot, key=key, descriptor=job)
+    briefing(slot, assignment)
+    if not slot.mission_started:
+        focus(slot, key)
     return f'Reservation confirmed: {public_code(job["id"], slot)}.\n{job["description"].replace(job["target"], target_name(job))}\nTarget: {target_name(job)} (address in Atlas). Payment: {job["reward"]} CPH.'
 
 
@@ -483,6 +505,16 @@ def _shell(slot, verb, args, job):
         from .exploits import run_exploit
         return run_exploit(slot, args[0])
     arity = {'history': 0, 'jump': 1, 'rumors': 0, 'apps': 0, 'contracts': 0, 'accept': 1, 'route': 0, 'status': 0, 'brief': 0, 'abort': 0, 'connect': 1, 'submit': 0, 'disconnect': 0, 'ls': 0, 'get': 1, 'rm': 1}
+    if verb == 'assignments' and not args:
+        from .contracts import public_code
+        return '\n'.join(f'{public_code(entry.key, slot)} / {entry.descriptor["title"]}' for entry in slot.assignments.filter(status='accepted')) or 'No accepted assignments.'
+    if verb == 'select' and len(args) == 1:
+        from .assignments import focus
+        entry = next((entry for entry in slot.assignments.filter(status='accepted') if str(codes(slot).get(entry.key)) == args[0]), None)
+        if not entry:
+            raise GameError('Choose a numeric ID from assignments.')
+        focus(slot, entry.key)
+        return f'Assignment {args[0]} selected. Its saved evidence is available.'
     if verb == 'use':
         if len(args) != 1:
             raise GameError('Use use <license-id>.')
@@ -580,30 +612,8 @@ def _shell(slot, verb, args, job):
         fail(slot, 'Assignment abandoned.')
         return 'Broker notified.'
     if verb == 'submit' and not args:
-        if not slot.active_contract:
-            raise GameError('No reserved contract to submit.')
-        if slot.mission_started:
-            raise GameError('Cannot deliver evidence while connected to the target.')
-        local_copy = next((entry for entry in slot.local_files if entry['id'] == state.get('local_file_id')), None)
-        if job['objective'] == 'retrieve' and local_copy and local_copy.get('encrypted'):
-            raise GameError('Broker rejected delivery: archive is encrypted. Decrypt the local copy with Rosetta first.')
-        if job.get('delete_paths'):
-            from .deletion import missing_deletions
-            server = ensure_server(slot, job)
-            missing = missing_deletions(job, server.files, state.get('deletion_receipts', []))
-            if missing:
-                raise GameError('Broker rejected delivery: deletion proof missing for required copies:\n' + '\n'.join('/' + path for path in missing))
-        fulfilled = (state.get('recovered') and local_copy) if job['objective'] == 'retrieve' else state.get('deleted')
-        if not fulfilled or not state.get('clean_exit'):
-            raise GameError('Broker rejected delivery: objective or clean exit evidence missing.')
-        transact(slot, job['reward'], f'Contract payment // {public_code(job["id"], slot)}')
-        slot.reputation += job['reputation']
-        slot.completed += 1
-        record_contract(slot, job, timezone.now() + timedelta(seconds=SUCCESS_COOLDOWN))
-        slot.contract_cooldowns = {**slot.contract_cooldowns, job['id']: (timezone.now() + timedelta(seconds=SUCCESS_COOLDOWN)).isoformat()}
-        slot.active_contract = ''
-        slot.mission_state = {}
-        return f'Delivery verified. +{job["reward"]} CPH / +{job["reputation"]} reputation.\nThe broker will publish a new assignment after its sourcing delay.'
+        from .mailbox import terminal_submit
+        return terminal_submit(slot)
     if not slot.mission_started:
         raise GameError('No remote connection.')
     if verb == 'disconnect' and not args:

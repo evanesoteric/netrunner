@@ -55,8 +55,8 @@ Software purchases show a brief build animation and completion notice. Fitting h
 - **Custom machines:** 40 named hardware products across five tiers: two processors, gateways, memory modules, and drives per tier. Hardware purchases enter inventory and must be fitted. Spare components can be sold at half price.
 - **Specialized software:** 50 individual licenses: Cartograph network mappers, Lockpick authentication crackers, Rosetta decryptors, Logcleaner terminal extensions, and Tripwire trace monitors. Each has five capability classes and Pro/Micro variants. Micro trades speed for lower memory use. All software runs as primary-terminal applets.
 - **World routing:** Atlas contains named fictional servers and dozens of public-access proxies worldwide. Select an ordered proxy chain, reorder/remove hops, and commit it. The route is drawn from your home gateway through the proxies to the reserved target. Pan and zoom the map or use the accessible saved-server list. Routes remain committed across sessions.
-- **Manual contracts:** reserve with the broker or local shell, then submit through the shell. The broker publishes target, artifact, objective, clearance, and reward. There are retrieval, encrypted recovery, and deletion jobs at each rank.
-- **An economy with consequences:** routing leases and tool computation consume Cipher (CPH). Failed jobs cost up to `90 + 80 × job rank` CPH and 60 reputation (both balances floor at zero). Accepted jobs never return; the broker sources new assignments using server time. A bankrupt runner can sell spare equipment or explicitly restart that slot by typing their alias.
+- **Manual contracts:** reserve with the broker or local shell, then deliver evidence by replying to the briefing in Email. Up to ten assignments can be accepted; `submit` remains a shortcut that sends a broker email. The broker publishes target, artifact, objective, clearance, and reward. There are retrieval, encrypted recovery, and deletion jobs at each rank.
+- **An economy with consequences:** routing leases and tool computation consume Cipher (CPH). Detection costs `90 + 80 × job rank` CPH through an agency settlement and 60 reputation (floor zero). Voluntary aborts retain their immediate broker fine, capped by current plus reserve funds. Accepted jobs never return; the broker sources new assignments using server time. A bankrupt runner can sell spare equipment or explicitly restart that slot by typing their alias.
 
 Accounts retain three independent saves. Ranks are Ghost, Signal, Operator, Spectre, and Architect at 0, 100, 250, 450, and 700 reputation. Contracts are available at the runner's rank, one rank above, and one below. Products are purchasable through tier `min(5, rank + 2)`.
 
@@ -70,7 +70,7 @@ Each console has its own `help` manual. Commands run entirely inside the game's 
 
 | Application | Commands / purpose |
 | --- | --- |
-| Local terminal | `apps`, `contracts`, `accept <id>`, `brief`, `route`, `connect <host>`, `lockpick`, `scan <host>`, `logcleaner [license-id]`, `decrypt <file>`, `status`, `ls`, `get <file>`, `rm <file>`, `disconnect`, `submit`, `abort`, `clear` |
+| Local terminal | `apps`, `contracts`, `assignments`, `select <id>`, `accept <id>`, `brief`, `route`, `connect <host>`, `lockpick`, `scan <host>`, `logcleaner [license-id]`, `decrypt <file>`, `status`, `ls`, `get <file>`, `rm <file>`, `disconnect`, `submit`, `abort`, `clear` |
 | Cartograph | `scan <host>` discovers authentication ports and archive metadata |
 | Lockpick | Graphical password breaker: scan a server, connect to its login, then click **Break password** |
 | Rosetta | `decrypt <file>` supports remote archives while logged in, or local files while disconnected |
@@ -95,7 +95,7 @@ Purchase licenses at Null Exchange and use them from the primary terminal. Upgra
 
 **Backdoors:** scan a contract target or directory server with Cartograph, connect from the local terminal, crack its discovered port with Lockpick, then run `install` in the primary terminal. Installation requires mounted filesystem access. Clean the initial intrusion logs with Logcleaner before disconnecting. Backdoors persist after contract completion and sign-out.
 
-**Backdoored Servers** appears only while the Wraith license is owned. Its Connect buttons launch/open your terminal and connect directly to the selected server. You can also use `jump <host>`. These later connections bypass the saved proxy chain and its lease, grant filesystem access, suppress remote access logs, and have no trace countdown. Your saved proxy route remains available for ordinary connections. A reserved contract still must match the server you visit, and objective evidence plus a clean disconnect and `submit` are still required for payment.
+**Backdoored Servers** appears only while the Wraith license is owned. Its Connect buttons launch/open your terminal and connect directly to the selected server. You can also use `jump <host>`. These later connections bypass the saved proxy chain and its lease, grant filesystem access, suppress remote access logs, and have no trace countdown. Your saved proxy route remains available for ordinary connections. A connection to an accepted target selects that contract automatically; its saved evidence stays separate from other assignments, and objective evidence plus a clean disconnect and `submit` are still required for payment.
 
 **Ransomware:** four starter opportunity servers appear in amber in Atlas's directory. Add them to your map if desired. Scan, connect, and crack one, then run `deploy <host>` in Eclipse. Contract targets and ordinary proxy-only servers refuse deployment. At most **three instances** may be active per save, with one per server. Each completes after **120 seconds**, pays **800 CPH** on a starter server, and removes itself. Higher-rank generated opportunities pay `800 + 200 × rank` CPH. You may deploy again after completion; the perpetual license remains owned. Clean your access logs and disconnect while operations run, or use an existing Wraith backdoor.
 
@@ -255,7 +255,7 @@ Addresses persist in PostgreSQL across sessions, restarts and backups. The alloc
 
 ## Cipher Bank accounts, loans and complete statements
 
-Each save has its own current account, reserve account and loan balance. Purchases, route leases, compute and repayments use current funds. Transfers to reserve keep money separate from spending; transfer it back when needed. Transfers are free and stay within the same save. Trace and contract fines collect from current funds first, then reserve. Net worth is current + reserve − outstanding loan debt. Cipher Bank stays on its own page without a resident process or Workspace panel.
+Each save has its own current account, reserve account and loan balance. Purchases, route leases, compute and repayments use current funds. Transfers to reserve keep money separate from spending; transfer it back when needed. Transfers are free and stay within the same save. Voluntary-abort fines collect from current funds first, then reserve. Detection settlements require a manual bank transfer from current funds. Net worth is current + reserve − outstanding loan debt − unpaid agency settlements. Cipher Bank stays on its own page without a resident process or Workspace panel.
 
 The bank offers one active loan at a time, with a principal limit of **1,000 + 750 × rank** CPH (1,000 at Ghost, up to 4,000 at Architect) and a minimum of 100 CPH. A fixed **5% fee, rounded up**, is added to debt once. Borrowing 500 CPH credits the full 500 and creates 525 CPH of debt. There is no compounding, due date, offline charge or automatic repayment. Partial repayments are supported; paying off the loan unlocks borrowing again. Existing debt does not change when rank changes. Forms show the fee and total before borrowing.
 
@@ -277,3 +277,20 @@ history 2
 Transfers and loan actions create linked entries showing both sides. A positive loan-account amount increases debt; a negative amount records repayment. Loan proceeds are not profit, and transfers do not change net worth. Retrying the same form request cannot move funds twice. Balances, debt, terms, references and complete history are included in PostgreSQL backups. Restarting a runner clears that save's financial state; other saves remain independent.
 
 Investments and fictional stock trading remain a separate design topic. Reserve funds earn no passive yield in this version.
+
+
+## Email, multiple assignments and agency settlements
+
+The **Email** sidebar page is a persistent mailbox per save, with Inbox, Sent, unread counts, replies, composition and 25-message history pages. Refresh mail to include new arrivals while paging. All contacts and attachments belong to the fictional game; no real email or files are sent outside the simulation.
+
+Accept up to **10 contracts** at a time, through the broker or `accept <id>`. Each acceptance removes its offer and sends a full briefing from `dispatch@broker.internal`. Use the broker's Select button or `select <id>` while disconnected; `assignments` lists your accepted jobs. Connecting to another accepted target selects it automatically. Only one remote connection runs at a time. Evidence and deletion receipts are stored separately for each assignment, and all accepted targets remain in Atlas even after rank changes.
+
+To complete a contract, disconnect cleanly, open its briefing, and choose **Submit contract by email**. Recovery jobs require the correct, readable local file attached. Delete jobs attach simulated receipts automatically. The broker checks objective provenance, decryption, all required deletions and clean exit before paying, then replies with approval or rejection. `submit` in the primary terminal sends the same email with the selected objective file attached; it does not bypass verification. Rejected deliveries remain in Sent and receive an explanatory reply. Sending an attachment keeps the local file; archived attachment metadata survives later disk cleanup. Compose and ordinary Reply also allow messages to the broker, agency or your own in-game mailbox. Sending freeform text does not manufacture contract proof or settle a case.
+
+A **completed trace** or **dirty-log disconnect** causes immediate loss of the affected assignment and 60 reputation (floor zero). Other accepted jobs and local files survive. The **Signal Intelligence Bureau** sends a notice with the target, exact settlement amount (`90 + 80 × target rank` CPH), case reference and **Meridian Legal Services** beneficiary account `MERIDIAN-LEGAL-001`. This starts on the first detection. Voluntary aborts generate a broker notice and their existing immediate fine instead of an agency case.
+
+1. Read the agency notice in Email.
+2. In Cipher Bank, transfer the exact settlement from current funds using that case reference. Withdraw reserve funds or use available credit if needed. The bank records a receipt and sends a confirmation email.
+3. Return to the agency notice and choose **Confirm settlement by email**. The agency verifies the matching bank receipt and closes the case.
+
+New reservations are suspended while any case is unpaid **or awaiting confirmation**. Existing contracts can still be completed to earn funds; exploration, banking, selling spares and save restart remain available. Cases have no timed escalation, interest or automatic debit. A forged confirmation, wrong beneficiary, wrong amount or insufficient funds cannot settle a case. Duplicate sends and transfer retries cannot repeat a payout or charge. Mail, active assignments, evidence and cases persist in PostgreSQL and normal backups; restarting a save clears them only for that save.

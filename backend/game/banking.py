@@ -9,10 +9,13 @@ MAX_CPH = 2_000_000_000
 
 
 def summary(slot):
-    return dict(identity=slot.created_at.isoformat(), current_balance=slot.balance, reserve_balance=slot.reserve_balance,
+    from .mailbox import cases
+    notices = cases(slot)
+    due = sum(row['amount'] for row in notices if row['status'] == 'unpaid')
+    return dict(enforcement_cases=notices, enforcement_due=due, identity=slot.created_at.isoformat(), current_balance=slot.balance, reserve_balance=slot.reserve_balance,
                 loan_balance=slot.loan_balance, loan_principal=slot.loan_principal, loan_fee=slot.loan_fee,
                 loan_started_at=slot.loan_started_at, loan_limit=1000 + slot.rank * 750, minimum_loan=100,
-                fee_percent=5, net_worth=slot.balance + slot.reserve_balance - slot.loan_balance)
+                fee_percent=5, net_worth=slot.balance + slot.reserve_balance - slot.loan_balance - due)
 
 
 def history(slot, page=1, snapshot=None, page_size=PAGE_SIZE):
@@ -39,20 +42,24 @@ def positive_amount(value):
     return value
 
 
-def perform(slot, action, amount, request_id=None):
+def perform(slot, action, amount, request_id=None, *, case_reference=None, recipient=None):
     amount = positive_amount(amount)
-    if action not in ('loan', 'repay', 'deposit', 'withdraw'):
+    if action not in ('loan', 'repay', 'deposit', 'withdraw', 'settle'):
         raise GameError('Choose loan, repay, deposit or withdraw.')
     try:
         reference = UUID(str(request_id)) if request_id is not None else uuid4()
     except (ValueError, TypeError, AttributeError):
         raise GameError('A valid transaction reference is required.')
+    context = str(case_reference or '') if action == 'settle' else ''
     previous = slot.bank_actions.filter(request_id=reference).first()
     if previous:
-        if previous.action != action or previous.amount != amount:
+        if previous.action != action or previous.amount != amount or previous.context != context:
             raise GameError('This transaction reference was already used for different instructions.')
         return 'Transaction already processed. No funds moved again.'
-    if action == 'loan':
+    if action == 'settle':
+        from .mailbox import pay_case
+        result = pay_case(slot, case_reference, recipient, amount)
+    elif action == 'loan':
         if slot.loan_balance:
             raise GameError('Repay your existing loan before taking another.')
         if not 100 <= amount <= 1000 + slot.rank * 750:
@@ -84,7 +91,7 @@ def perform(slot, action, amount, request_id=None):
         transact(slot, -amount, 'Transfer to current // reserve account', account='reserve', reference=reference)
         transact(slot, amount, 'Transfer from reserve // current account', reference=reference)
         result = f'Transferred {amount:,} CPH to current.'
-    BankAction.objects.create(slot=slot, request_id=reference, action=action, amount=amount)
+    BankAction.objects.create(slot=slot, request_id=reference, action=action, amount=amount, context=context)
     return result
 
 

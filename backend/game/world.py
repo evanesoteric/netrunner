@@ -13,6 +13,10 @@ def all_contracts(slot=None):
 def get_contract(key, slot=None):
     if not key:
         return None
+    if slot:
+        assignment = slot.assignments.filter(key=key).first()
+        if assignment:
+            return assignment.descriptor
     if slot and key in slot.broker_jobs:
         return slot.broker_jobs[key]
     if key in CONTRACT_BY_ID:

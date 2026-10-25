@@ -14,11 +14,13 @@ RANSOM_SECONDS = 120
 
 def find_target(slot, address):
     address = resolve_host(slot, address)
-    job = get_contract(slot.active_contract, slot)
-    if job:
-        if address != job['target']:
-            raise GameError('Finish or abort the reserved assignment before visiting another target.')
-        return job
+    accepted = slot.assignments.filter(status='accepted').all()
+    match = next((entry for entry in accepted if entry.descriptor['target'] == address), None)
+    if match:
+        from .assignments import focus
+        if not slot.mission_started:
+            focus(slot, match.key)
+        return match.descriptor
     server = next((server for server in all_servers(slot) if server['address'] == address and not server.get('market')), None)
     if not server:
         known = slot.server_states.filter(address=address).first()
@@ -36,8 +38,6 @@ def connect_target(slot, address, backdoor=False):
     if slot.mission_started:
         raise GameError('Disconnect before opening another remote session.')
     if address == MARKET_ADDRESS and not backdoor:
-        if slot.active_contract:
-            raise GameError('Finish or abort your assignment before opening the hidden market.')
         slot.market_unlocked = True
         from .world import get_server
         market = target_for_server(get_server('world-4'))
@@ -49,9 +49,10 @@ def connect_target(slot, address, backdoor=False):
         target = next((entry for entry in slot.backdoors if entry['target'] == address), None)
         if not target:
             raise GameError('No installed backdoor on that server.')
-        job = get_contract(slot.active_contract, slot)
-        if job and job['target'] != address:
-            raise GameError('Finish or abort the reserved assignment before jumping to another target.')
+        assignment = next((entry for entry in slot.assignments.filter(status='accepted') if entry.descriptor['target'] == address), None)
+        from .assignments import focus
+        focus(slot, assignment.key if assignment else '')
+        job = assignment.descriptor if assignment else None
         target = dict(job or target)
         ensure_server(slot, target)
         target = effective_target(slot, target)
@@ -61,6 +62,9 @@ def connect_target(slot, address, backdoor=False):
         slot.mission_started = timezone.now()
         return f'Backdoor link established: {ip_for(address)} ({target_name(target)}). Direct access / no proxy lease / remote logging suppressed.'
     target = find_target(slot, address)
+    if not slot.active_contract or get_contract(slot.active_contract, slot)['target'] != address:
+        from .assignments import focus
+        focus(slot, '')
     server = ensure_server(slot, target)
     target = effective_target(slot, target)
     validate_route(slot, slot.proxy_route)

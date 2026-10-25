@@ -2,6 +2,10 @@
 
 Historical feature and migration notes. See the [README](../README.md) for the current project overview and [development guide](DEVELOPMENT.md) for setup and maintenance.
 
+## v0.21 — Email, ten assignments and agency settlements
+
+Added a persistent per-save Email page with unread counts, Inbox/Sent pagination, replies and local-file attachments. Accepting contracts sends briefings; email deliveries validate objective evidence and receive broker replies. The terminal `submit` command sends through the same mail workflow. Up to ten accepted assignments retain independent proof and appear in Atlas; select one in the broker, with `select <id>`, or by connecting to its target. Trace completion and dirty-log disconnects issue Signal Intelligence Bureau settlement notices rather than automatically debiting funds. Pay Meridian Legal Services through Cipher Bank, then confirm by email to lift the reservation suspension. Existing accepted work remains playable. Voluntary abort penalties are unchanged. Migration 0017 adds assignments, mail, cases and bank request context; existing active saves adopt their current evidence and receive one briefing on next access. Backups retain the new records, and save restart removes them. No stock trading was added.
+
 ## v0.20.1 — trace warning audio
 
 Added a quiet, short sine-wave beep that accelerates with the visible trace countdown, plus a persistent browser-local mute control on the floating tracker. Audio requires a player gesture and pauses in background tabs. Inactive, unresolved and Wraith traces remain silent; no hidden deadline is exposed. Tones use the browser audio engine without downloads or external audio assets.

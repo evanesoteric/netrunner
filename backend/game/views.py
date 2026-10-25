@@ -70,6 +70,8 @@ def serialize(slot, detailed=False):
     tracing = trace_remaining(slot)
     started = slot.mission_state.get('trace_started', slot.mission_started.isoformat() if slot.mission_started else None) if tracing is not None else None
     remaining = tracing if monitor and target and monitor['power'] >= target['security'] else None
+    accepted = [dict(**public_job(entry.descriptor, mapping), focused=entry.key == slot.active_contract) for entry in slot.assignments.filter(status='accepted')]
+    from .mailbox import cases
     data = {
         'id': slot.id, 'position': slot.position, 'alias': slot.alias, 'created_at': slot.created_at,
         'balance': slot.balance, 'reserve_balance': slot.reserve_balance, 'loan_balance': slot.loan_balance, 'reputation': slot.reputation, 'rank': slot.rank,
@@ -77,6 +79,10 @@ def serialize(slot, detailed=False):
         'next_rank_at': THRESHOLDS[slot.rank + 1] if slot.rank + 1 < len(RANKS) else None,
         'rank_floor': THRESHOLDS[slot.rank], 'completed': slot.completed,
         'active_contract': public_job(job, mapping),
+        'accepted_contracts': accepted, 'contract_limit': 10,
+        'mail_unread': slot.mail.filter(folder='inbox', read=False).count(),
+        'mail_latest_id': slot.mail.values_list('id', flat=True).first() or 0,
+        'enforcement_cases': cases(slot),
         'deletion_progress': deletion_progress(slot, job),
         'broker_next_at': min((entry['due_at'] for entry in slot.broker_pending), default=None),
         'connected': bool(slot.mission_started),
@@ -111,7 +117,7 @@ def serialize(slot, detailed=False):
                 contracts.append({**public_job(job, mapping), 'available_at': ready.isoformat() if ready else None})
         data.update({
             'contracts': contracts,
-            'target_directory': [dict(id='destination-' + item['id'], name=item['target_name'], operator=item.get('organization', item['target_name']), address=item['target'], ip_address=item['ip_address'], category='Contract target', location='Private network', rank=item['rank'], service_name=item['service_name'], destination=True, contract_id=item['id']) for item in [*contracts, *([public_job(get_contract(slot.active_contract, slot), mapping)] if slot.active_contract else [])]],
+            'target_directory': [dict(id='destination-' + item['id'], name=item['target_name'], operator=item.get('organization', item['target_name']), address=item['target'], ip_address=item['ip_address'], category='Contract target', location='Private network', rank=item['rank'], service_name=item['service_name'], destination=True, contract_id=item['id']) for item in [*contracts, *accepted]],
             'workspace_layout': slot.workspace_layout,
             'workspace_revision': slot.workspace_revision,
             'equipment': hardware(slot),
@@ -142,7 +148,7 @@ def serialize(slot, detailed=False):
 @ensure_csrf_cookie
 @api(['GET'], authenticated=False)
 def session(request):
-    return JsonResponse({'user': {'username': request.user.username} if request.user.is_authenticated else None, 'currency': CURRENCY, 'ranks': RANKS, 'version': '0.20.0', 'server_time': timezone.now().isoformat()})
+    return JsonResponse({'user': {'username': request.user.username} if request.user.is_authenticated else None, 'currency': CURRENCY, 'ranks': RANKS, 'version': '0.21.0', 'server_time': timezone.now().isoformat()})
 
 @api(['POST'], authenticated=False)
 def register(request):
@@ -315,6 +321,9 @@ def restart(request, slot_id):
         setattr(slot, field, getattr(fresh, field))
     slot.created_at = timezone.now()
     slot.save()
+    slot.mail.all().delete()
+    slot.assignments.all().delete()
+    slot.enforcement_cases.all().delete()
     slot.ledger.all().delete()
     slot.bank_actions.all().delete()
     slot.server_states.all().delete()
@@ -337,13 +346,16 @@ def contract_action(request, slot_id):
     action = request.data.get('action')
     if action == 'accept':
         reserve(slot, code)
-    elif action == 'abort':
-        current = get_contract(slot.active_contract, slot)
-        if not current or public_job(current, codes(slot))['id'] != code:
+    elif action in ('abort', 'focus'):
+        from .assignments import focus
+        assignment = next((entry for entry in slot.assignments.filter(status='accepted') if str(codes(slot).get(entry.key)) == code), None)
+        if not assignment:
             raise GameError('That assignment is no longer reserved. Refresh the broker.')
-        fail(slot, 'Assignment abandoned.')
+        focus(slot, assignment.key)
+        if action == 'abort':
+            fail(slot, 'Assignment abandoned.')
     else:
-        raise GameError('Choose accept or abort.')
+        raise GameError('Choose accept, focus or abort.')
     slot.save()
     return JsonResponse(serialize(slot, True))
 
@@ -474,7 +486,7 @@ def bank(request, slot_id):
             return JsonResponse({'error': 'This runner was restarted. Refresh the bank before moving funds.'}, status=409)
         if not request.data.get('request_id'):
             raise GameError('A transaction reference is required.')
-        result = perform(slot, request.data.get('action'), request.data.get('amount'), request.data['request_id'])
+        result = perform(slot, request.data.get('action'), request.data.get('amount'), request.data['request_id'], case_reference=request.data.get('case_reference'), recipient=request.data.get('recipient'))
         slot.save()
         return JsonResponse({'bank': summary(slot), 'history': history(slot), 'message': result, 'slot': serialize(slot, True)})
     identity = request.GET.get('identity')
@@ -485,3 +497,44 @@ def bank(request, slot_id):
     if not page.isdecimal() or len(page) > 10 or (snapshot is not None and (not snapshot.isdecimal() or len(snapshot) > 18)):
         raise GameError('Invalid ledger page or snapshot.')
     return JsonResponse({'bank': summary(slot), 'history': history(slot, int(page), int(snapshot) if snapshot is not None else None)})
+
+
+@api(['GET', 'POST'])
+@transaction.atomic
+def mail(request, slot_id):
+    from .mailbox import send, serialize as serialize_mail, address, BROKER, AGENCY
+    slot = SaveSlot.objects.select_for_update().get(pk=slot_id, user=request.user)
+    settle(slot)
+    if request.method == 'POST':
+        if request.data.get('identity') != slot.created_at.isoformat():
+            return JsonResponse({'error': 'This save was restarted. Refresh Email before sending.'}, status=409)
+        if request.data.get('action') == 'read':
+            message_id = request.data.get('message_id')
+            if type(message_id) is not int or not slot.mail.filter(pk=message_id).exists():
+                raise GameError('Message not found in this save.')
+            slot.mail.filter(pk=message_id).update(read=True)
+            result = 'Message read.'
+        elif request.data.get('action') == 'send':
+            result = send(slot, request.data)
+        else:
+            raise GameError('Choose read or send.')
+        slot.save()
+        return JsonResponse({'message': result, 'slot': serialize(slot, True)})
+    folder = request.GET.get('folder', 'inbox')
+    if folder not in ('inbox', 'sent'):
+        raise GameError('Choose inbox or sent mail.')
+    page = request.GET.get('page', '1')
+    snapshot = request.GET.get('snapshot')
+    if not page.isdecimal() or len(page) > 9 or int(page) < 1 or (snapshot is not None and (not snapshot.isdecimal() or len(snapshot) > 18)):
+        raise GameError('Invalid mail page or snapshot.')
+    latest = slot.mail.values_list('id', flat=True).first() or 0
+    anchor = int(snapshot) if snapshot is not None else latest
+    if anchor > latest:
+        raise GameError('Refresh the mailbox snapshot.')
+    query = slot.mail.filter(folder=folder, id__lte=anchor)
+    total = query.count(); pages = max(1, (total + 24) // 25); page = int(page)
+    if page > pages:
+        raise GameError('Mail page does not exist.')
+    return JsonResponse({'identity': slot.created_at.isoformat(), 'address': address(slot),
+                         'contacts': [BROKER, AGENCY, address(slot)], 'messages': [serialize_mail(row) for row in query[(page-1)*25:page*25]],
+                         'page': page, 'pages': pages, 'total': total, 'snapshot': anchor, 'has_newer': latest > anchor})

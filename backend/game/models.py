@@ -1,3 +1,4 @@
+from uuid import uuid4
 from django.conf import settings
 from django.db import models
 from django.db.models import Q
@@ -144,7 +145,54 @@ class BankAction(models.Model):
     request_id = models.UUIDField()
     action = models.CharField(max_length=12)
     amount = models.PositiveIntegerField()
+    context = models.CharField(max_length=64, blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=['slot', 'request_id'], name='unique_bank_transaction_request')]
+
+
+class Assignment(models.Model):
+    slot = models.ForeignKey(SaveSlot, on_delete=models.CASCADE, related_name='assignments')
+    key = models.CharField(max_length=64)
+    descriptor = models.JSONField(default=dict)
+    state = models.JSONField(default=dict)
+    status = models.CharField(max_length=12, default='accepted')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['slot', 'key'], name='unique_save_assignment')]
+        ordering = ['id']
+
+
+class EnforcementCase(models.Model):
+    slot = models.ForeignKey(SaveSlot, on_delete=models.CASCADE, related_name='enforcement_cases')
+    reference = models.UUIDField(default=uuid4, unique=True)
+    target = models.CharField(max_length=160)
+    amount = models.PositiveIntegerField()
+    status = models.CharField(max_length=12, default='unpaid')
+    payment_reference = models.UUIDField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    paid_at = models.DateTimeField(null=True, blank=True)
+    closed_at = models.DateTimeField(null=True, blank=True)
+
+
+class MailMessage(models.Model):
+    slot = models.ForeignKey(SaveSlot, on_delete=models.CASCADE, related_name='mail')
+    folder = models.CharField(max_length=8, default='inbox')
+    sender = models.CharField(max_length=100)
+    recipient = models.CharField(max_length=100)
+    subject = models.CharField(max_length=180)
+    body = models.TextField()
+    kind = models.CharField(max_length=24, default='message')
+    assignment = models.ForeignKey(Assignment, null=True, blank=True, on_delete=models.CASCADE, related_name='mail')
+    case = models.ForeignKey(EnforcementCase, null=True, blank=True, on_delete=models.CASCADE, related_name='mail')
+    reply_to = models.ForeignKey('self', null=True, blank=True, on_delete=models.SET_NULL)
+    attachments = models.JSONField(default=list)
+    request_id = models.UUIDField(null=True, blank=True)
+    read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-id']
+        constraints = [models.UniqueConstraint(fields=['slot', 'request_id'], name='unique_mail_send_request')]

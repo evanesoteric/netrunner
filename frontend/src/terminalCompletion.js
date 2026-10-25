@@ -1,6 +1,6 @@
 // Completion only offers commands and names already available to this runner.
 const commands = {
-  terminal: ['ping', 'resolve', 'exploit', 'exploits', 'applets', 'use', 'trace', 'install', 'deploy', 'abort', 'accept', 'apps', 'brief', 'cat', 'cd', 'pwd', 'find', 'clear', 'connect', 'contracts', 'decrypt', 'disconnect', 'get', 'help', 'history', 'jump', 'lockpick', 'logcleaner', 'login', 'ls', 'rm', 'route', 'rumors', 'scan', 'status', 'submit'],
+  terminal: ['assignments', 'select', 'ping', 'resolve', 'exploit', 'exploits', 'applets', 'use', 'trace', 'install', 'deploy', 'abort', 'accept', 'apps', 'brief', 'cat', 'cd', 'pwd', 'find', 'clear', 'connect', 'contracts', 'decrypt', 'disconnect', 'get', 'help', 'history', 'jump', 'lockpick', 'logcleaner', 'login', 'ls', 'rm', 'route', 'rumors', 'scan', 'status', 'submit'],
   mapper: ['help', 'scan'], decryptor: ['decrypt', 'help'], monitor: ['help', 'trace'],
   bank: ['accounts', 'balance', 'deposit', 'withdraw', 'loan', 'repay', 'help', 'history'], rootkit: ['help', 'install'], ransomware: ['deploy', 'help'],
 }
@@ -19,6 +19,7 @@ export function completion(text, cursor, app, slot) {
     const verb = context[0].toLowerCase()
     if (['ping', 'resolve', 'scan', 'connect', 'deploy'].includes(verb)) pool = [...[...(slot.network_directory || []), ...(slot.target_directory || [])].flatMap(node => [node.ip_address, node.address]), slot.active_contract?.target, slot.active_contract?.ip_address, slot.remote_ip, slot.remote_target]
     if (verb === 'jump') pool = (slot.backdoors || []).flatMap(node => [node.ip_address, node.target])
+    if (verb === 'select') pool = (slot.accepted_contracts || []).map(job => String(job.id))
     if (verb === 'accept') pool = (slot.contracts || []).map(job => String(job.id))
     if (verb === 'exploit') pool = (slot.exploits || []).map(item => item.id)
     if (verb === 'use') pool = slot.installed_software || []

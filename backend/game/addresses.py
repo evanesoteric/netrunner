@@ -69,7 +69,7 @@ def known_targets(slot):
     from .world import all_servers, get_contract
     from .broker import offered_jobs
     job = get_contract(slot.active_contract, slot)
-    return [*all_servers(slot), *offered_jobs(slot), *([job] if job else []), *[row.descriptor for row in slot.server_states.all()]]
+    return [*all_servers(slot), *[entry.descriptor for entry in slot.assignments.filter(status='accepted')], *offered_jobs(slot), *([job] if job else []), *[row.descriptor for row in slot.server_states.all()]]
 
 
 def resolve_host(slot, identifier):

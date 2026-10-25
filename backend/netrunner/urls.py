@@ -2,6 +2,7 @@ from django.urls import path
 from game import views
 
 urlpatterns = [
+    path('api/slots/<int:slot_id>/mail/', views.mail),
     path('api/slots/<int:slot_id>/irc/', views.irc),
     path('api/slots/<int:slot_id>/bank/', views.bank),
     path('api/session/', views.session),

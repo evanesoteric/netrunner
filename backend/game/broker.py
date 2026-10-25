@@ -12,14 +12,15 @@ from django.utils.dateparse import parse_datetime
 
 def offered_jobs(slot):
     from .world import all_contracts
-    return [job for job in all_contracts(slot) if job['id'] not in slot.broker_consumed and abs(job['rank'] - slot.rank) <= 1][:48]
+    accepted = set(slot.assignments.values_list('key', flat=True))
+    return [job for job in all_contracts(slot) if job['id'] not in accepted and job['id'] not in slot.broker_consumed and abs(job['rank'] - slot.rank) <= 1][:48]
 
 
 def ensure_tickets(slot):
     from .contracts import codes
     base = codes()
     jobs = offered_jobs(slot)
-    keys = ([slot.active_contract] if slot.active_contract else []) + [job['id'] for job in jobs]
+    keys = list(slot.assignments.filter(status='accepted').values_list('key', flat=True)) + ([slot.active_contract] if slot.active_contract else []) + [job['id'] for job in jobs]
     # Retain active and already-visible tickets. Only live offers need distinct 8-bit codes.
     keys = sorted(set(keys), key=lambda key: (key != slot.active_contract, key not in slot.broker_codes))
     used, mapping = set(), dict(slot.broker_codes)

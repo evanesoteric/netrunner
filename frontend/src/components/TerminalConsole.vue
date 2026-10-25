@@ -94,7 +94,7 @@ onMounted(async () => { resetCompletion(); await scroll(true); if (props.autofoc
   <section class="panel terminal-panel">
     <div class="panel-title"><span><Terminal :size="16" /> {{ name.toUpperCase() }}</span><span class="panel-meta">{{ application === 'bank' ? 'CIPHER PRIVATE ACCOUNT' : slot.connected ? 'REMOTE LINK ACTIVE' : application === 'terminal' ? `LOCAL DRIVE ${slot.storage_used} / ${slot.equipment.storage.capacity} MB` : 'LOCAL SESSION' }}</span></div>
     <div ref="output" class="terminal-log" role="log" :aria-label="`${application} output`" @pointerup="focusOutput" @scroll="trackScroll">
-      <div class="terminal-banner">NETRUNNER / {{ application.toUpperCase() }} [v0.20]<br>{{ application === 'terminal' ? (slot.authenticated ? `${slot.remote_name} / admin@${slot.remote_ip || slot.remote_target}.` : 'Local shell ready. Owned software applets run here. Type applets to list them.') : 'Application process ready.' }} Type help for its reference manual.<br>─────────────────────────────────────────────────────</div>
+      <div class="terminal-banner">NETRUNNER / {{ application.toUpperCase() }} [v0.21]<br>{{ application === 'terminal' ? (slot.authenticated ? `${slot.remote_name} / admin@${slot.remote_ip || slot.remote_target}.` : 'Local shell ready. Owned software applets run here. Type applets to list them.') : 'Application process ready.' }} Type help for its reference manual.<br>─────────────────────────────────────────────────────</div>
       <pre v-for="(entry, i) in entries" :key="i">{{ entry.text }}</pre>
       <span v-if="busy" class="terminal-muted" role="status">PROCESSING…</span>
     </div>

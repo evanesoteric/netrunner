@@ -1,7 +1,8 @@
 <script setup>
 import { computed, ref, nextTick, onMounted, onUnmounted, watch } from 'vue'
-import { Terminal, Network, BriefcaseBusiness, Cpu, Landmark, Layers3, ArrowUpRight, ArrowRight, ChevronRight, Radio, ShieldCheck, LogOut, Plus, X, Check, Globe, Fingerprint, Activity, Grid2X2, Play, LockKeyhole, NotebookPen } from 'lucide-vue-next'
+import { Terminal, Network, BriefcaseBusiness, Cpu, Landmark, Layers3, ArrowUpRight, ArrowRight, ChevronRight, Radio, ShieldCheck, LogOut, Plus, X, Check, Globe, Fingerprint, Activity, Grid2X2, Play, LockKeyhole, NotebookPen, Mail } from 'lucide-vue-next'
 import IrcUnderground from './components/IrcUnderground.vue'
+import EmailView from './components/EmailView.vue'
 import BankView from './components/BankView.vue'
 import WorkspaceView from './components/WorkspaceView.vue'
 import PasswordBreaker from './components/PasswordBreaker.vue'
@@ -30,12 +31,13 @@ const nav = computed(() => [
   { id: 'overview', label: 'Desktop', icon: Network },
   { id: 'workspace', label: 'Workspace', icon: Grid2X2 },
   { id: 'broker', label: 'Contract broker', icon: BriefcaseBusiness },
+  { id: 'mail', label: 'Email', icon: Mail },
   { id: 'bank', label: 'Cipher bank', icon: Landmark },
   { id: 'atlas', label: 'Atlas network', icon: Globe },
   { id: 'exchange', label: 'Store', icon: Cpu },
   { id: 'irc', label: 'IRC Underground', icon: Radio },
   { id: 'launcher', label: 'Applications', icon: Grid2X2 },
-  { id: 'notes', label: 'Field Notes', icon: NotebookPen },
+  { id: 'notes', label: 'Field Notes', icon: NotebookPen, Mail },
   { id: 'history', label: 'Server Histories', icon: Activity },
   { id: 'blackmarket', label: 'Null Exchange', icon: LockKeyhole, visible: !!slot.value?.market_unlocked },
   { id: 'backdoors', label: 'Backdoored Servers', icon: ShieldCheck, visible: !!slot.value?.installed_software.includes('rootkit-epic') },
@@ -151,6 +153,14 @@ async function closeApplication(application, stay = false, expectedSlot = null) 
     return true
   })
 }
+async function mailAction(payload, expectedSlot) {
+  if (slot.value?.id !== expectedSlot) return false
+  return act(async () => {
+    const response = await api(`slots/${expectedSlot}/mail/`, payload)
+    updateSlot(response.slot)
+    return response
+  })
+}
 async function bankTransaction(payload, expectedSlot) {
   if (slot.value?.id !== expectedSlot) return false
   return act(async () => {
@@ -198,7 +208,7 @@ async function jumpBackdoor(target) {
 async function contractAction(action, job) {
   await act(async () => {
     updateSlot(await api(`slots/${slot.value.id}/contracts/`, { action, contract_id: job.id }))
-    notice.value = action === 'accept' ? `Contract ${job.id} reserved. Open your tools to begin.` : 'Contract aborted. Liability and reputation loss recorded.'
+    notice.value = action === 'accept' ? `Contract ${job.id} reserved. Briefing delivered to Email.` : action === 'focus' ? `Contract ${job.id} selected.` : 'Contract aborted. Liability and reputation loss recorded.'
   })
 }
 async function trade(action, productId) {
@@ -238,9 +248,9 @@ onUnmounted(() => { clearInterval(clock); clearInterval(poller) })
   <div class="app-shell" :inert="loginDialog || !!buildProduct">
     <aside class="sidebar">
       <a class="brand" href="#" @click.prevent="page = 'overview'" aria-label="Netrunner home"><span class="brand-icon"><Terminal :size="23" /></span><span>netrunner<span class="brand-dot">_</span><small>INDEPENDENT NETWORK ACCESS</small></span></a>
-      <div class="workspace-label">WORKSPACE <span>V.0.20</span></div>
+      <div class="workspace-label">WORKSPACE <span>V.0.21</span></div>
       <nav aria-label="Main navigation">
-        <button v-for="item in nav" :key="item.id" :aria-label="item.label" :class="['nav-item', { active: page === item.id }]" @click="navigate(item)" :disabled="!slot || busy" :aria-current="page === item.id ? 'page' : undefined"><component :is="item.icon" :size="18" /><span>{{ item.label }}</span><span v-if="item.id === 'broker' && slot" class="nav-count">{{ slot.contracts.length }}</span><span v-if="item.id === 'terminal' && slot?.active_contract" class="live-dot"></span></button>
+        <button v-for="item in nav" :key="item.id" :aria-label="item.label" :class="['nav-item', { active: page === item.id }]" @click="navigate(item)" :disabled="!slot || busy" :aria-current="page === item.id ? 'page' : undefined"><component :is="item.icon" :size="18" /><span>{{ item.label }}</span><span v-if="item.id === 'mail' && slot?.mail_unread" class="nav-count">{{ slot.mail_unread }}</span><span v-if="item.id === 'broker' && slot" class="nav-count">{{ slot.contracts.length }}</span><span v-if="item.id === 'terminal' && slot?.active_contract" class="live-dot"></span></button>
       </nav>
       <div class="sidebar-note"><Radio :size="17" /><span>A quieter kind of power.<br><strong>Leave no trace.</strong></span></div>
       <button v-if="user" class="mobile-saves icon-button" :disabled="busy" @click="openSaves" aria-label="Manage save slots"><Layers3 :size="20" /></button>
@@ -286,7 +296,7 @@ onUnmounted(() => { clearInterval(clock); clearInterval(poller) })
           <ServerHistory v-else-if="page === 'history'" :key="`${slot.id}:${slot.created_at}`" :slot-id="slot.id" :api="api" :remote-target="slot.remote_target" />
           <IrcUnderground v-else-if="page === 'irc'" :key="`${slot.id}:${slot.created_at}`" :slot="slot" :busy="busy" :api="api" :send="sendIrc" />
           <ExchangeView v-else-if="page === 'exchange'" :slot="slot" :busy="busy" @trade="trade" @use="useApplet" />
-          <BrokerView v-else-if="page === 'broker'" :slot="slot" :busy="busy" :now="now" :offset="serverOffset" :ranks="ranks" @action="contractAction" />
+          <BrokerView v-else-if="page === 'broker'" :slot="slot" :busy="busy" :now="now" :offset="serverOffset" :ranks="ranks" @action="contractAction" @mail="page = 'mail'" />
           <template v-else-if="page === 'console' && currentProcess">
             <div class="eyebrow">OPERATIONS / {{ activeConsole.toUpperCase() }}</div><div class="page-heading"><div><h1>{{ currentProcess.name }}<span>_</span></h1><p>{{ currentProcess.ram }} GB allocated. Commands run inside this terminal.</p></div><span class="badge">{{ slot.connected ? 'REMOTE SESSION' : 'LOCAL SESSION' }}</span></div>
             <ServerLogin v-if="activeConsole === 'terminal'" :slot="slot" :busy="busy" @open-cracker="openCracker" />
@@ -296,7 +306,8 @@ onUnmounted(() => { clearInterval(clock); clearInterval(poller) })
             <BlackMarket :slot="slot" :busy="busy" @trade="trade" />
           </template>
           <BackdoorsView v-else-if="page === 'backdoors' && slot.installed_software.includes('rootkit-epic')" :slot="slot" :busy="busy" @connect="jumpBackdoor" />
-          <BankView v-else-if="page === 'bank'" :key="`${slot.id}:${slot.created_at}`" :slot="slot" :busy="busy" :api="api" :send="sendCommand" :transact="bankTransaction" />
+          <EmailView v-else-if="page === 'mail'" :key="`${slot.id}:${slot.created_at}`" :slot="slot" :busy="busy" :api="api" :mutate="mailAction" @bank="navigate({ id: 'bank' })" />
+          <BankView v-else-if="page === 'bank'" :key="`${slot.id}:${slot.created_at}`" :slot="slot" :busy="busy" :api="api" :send="sendCommand" :transact="bankTransaction" @mail="page = 'mail'" />
           <KeepAlive><WorkspaceView v-if="page === 'workspace'" ref="workspaceRef" :key="`${user.username}:${slot.id}:${slot.created_at}`" :slot="slot" :username="user.username" :busy="busy" :api="api" :send="sendCommand" :launch="(product, id) => launchApplication(product, true, id)" :close="(app, id) => closeApplication(app, true, id)" :now="now" :offset="serverOffset" :ranks="ranks" :breaker-action="breakerAction" @open-cracker="openCracker" @route="saveRoute" @directory="editDirectory" @trade="trade" @contract="contractAction" @jump="jumpBackdoor" /></KeepAlive>
           <KeepAlive><FieldNotes v-if="page === 'notes'" :key="`${user.username}:${slot.id}:${slot.created_at}`" :slot-id="slot.id" :username="user.username" :api="api" /></KeepAlive>
           <section v-if="slot.ransomware_ops.length" class="panel ransomware-panel"><div class="panel-title"><span>ECLIPSE / ACTIVE INSTANCES</span><span class="panel-meta">{{ slot.ransomware_ops.length }} / 3</span></div><div v-for="operation in slot.ransomware_ops" :key="operation.target" class="ransomware-row"><code>{{ operation.ip_address || operation.target }}</code><span>{{ Math.max(0, Math.ceil((Date.parse(operation.due_at) - now - serverOffset) / 1000)) }}s</span><strong>{{ operation.reward }} CPH</strong></div></section>

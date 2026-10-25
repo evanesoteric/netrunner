@@ -147,6 +147,7 @@ class SimulationTests(APIHelpers, TestCase):
         self.assertEqual(len(listed['contracts']), 27)
         for job in listed['contracts']:
             with self.subTest(contract_id=job['id']):
+                self.slot.assignments.all().delete()
                 SaveSlot.objects.filter(pk=self.slot.pk).update(active_contract='', mission_state={})
                 result = self.cmd(f'accept {job["id"]}')
                 self.assertIsNotNone(result['active_contract'], self.log_text(result))
@@ -365,7 +366,9 @@ class SimulationTests(APIHelpers, TestCase):
         first = self.refresh()
         self.assertIsNone(first['active_contract'])
         self.assertEqual(first['balance'], self.refresh()['balance'])
-        self.assertEqual(self.slot.ledger.filter(description__startswith='Contract failure').count(), 2)
+        self.assertEqual(self.slot.ledger.filter(description__startswith='Contract failure').count(), 1)
+        self.assertEqual(self.slot.enforcement_cases.count(), 1)
+        self.assertEqual(self.slot.enforcement_cases.get().status, 'unpaid')
 
     def test_retired_job_never_returns_and_a_new_assignment_arrives(self):
         self.reserve()
@@ -537,6 +540,47 @@ class ConcurrentEconomyTests(APIHelpers, TransactionTestCase):
                 close_old_connections()
         with ThreadPoolExecutor(max_workers=2) as pool:
             return list(pool.map(run, range(2)))
+
+    def test_concurrent_acceptance_stops_at_ten(self):
+        from .broker import offered_jobs
+        jobs = offered_jobs(self.slot)[:10]
+        for job in jobs[:9]:
+            self.reserve(job['id'])
+        outcomes = self.parallel_post('contracts', {'action':'accept', 'contract_id':public_code(jobs[9]['id'], self.slot)})
+        self.assertCountEqual(outcomes, [200,400])
+        self.assertEqual(self.slot.assignments.filter(status='accepted').count(), 10)
+        self.assertEqual(self.slot.mail.filter(kind='briefing').count(), 10)
+
+    def test_concurrent_email_deliveries_pay_once(self):
+        from uuid import uuid4
+        from .mailbox import BROKER
+        self.gain_access(); self.cmd('get research.dat'); self.clean_exit()
+        self.slot.refresh_from_db()
+        parent = self.slot.assignments.get().mail.get(kind='briefing')
+        payload = dict(action='send', identity=self.slot.created_at.isoformat(), request_id=str(uuid4()),
+                       recipient=BROKER, subject='Contract completed', body='Please verify', reply_to=parent.pk,
+                       intent='deliver', attachments=[self.slot.mission_state['local_file_id']])
+        self.assertEqual(self.parallel_post('mail', payload), [200,200])
+        self.slot.refresh_from_db()
+        self.assertEqual(self.slot.completed, 1)
+        self.assertEqual(self.slot.mail.filter(folder='sent').count(), 1)
+        self.assertEqual(self.slot.ledger.filter(description__startswith='Contract payment').count(), 1)
+
+    def test_concurrent_case_transfers_and_confirmations_only_happen_once(self):
+        from uuid import uuid4
+        from .mailbox import open_case, AGENCY, LEGAL_ACCOUNT
+        case = open_case(self.slot, 'Fictional archive', 90, 'Trace identified')
+        payload = dict(action='settle', identity=self.slot.created_at.isoformat(), request_id=str(uuid4()),
+                       recipient=LEGAL_ACCOUNT, amount=90, case_reference=str(case.reference))
+        self.assertEqual(self.parallel_post('bank', payload), [200,200])
+        self.assertEqual(self.slot.ledger.filter(description__startswith='Meridian Legal').count(), 1)
+        parent = case.mail.get(kind='enforcement')
+        payload = dict(action='send', identity=self.slot.created_at.isoformat(), request_id=str(uuid4()),
+                       recipient=AGENCY, subject='Settlement confirmation', body='Please verify', reply_to=parent.pk,
+                       intent='confirm', attachments=[])
+        self.assertEqual(self.parallel_post('mail', payload), [200,200])
+        case.refresh_from_db(); self.assertEqual(case.status, 'closed')
+        self.assertEqual(case.mail.filter(kind='agency_reply').count(), 1)
 
     def test_concurrent_erase_all_submissions_only_pay_once(self):
         from .persistence import ensure_server
@@ -825,6 +869,7 @@ class DevelopmentDatabaseLifecycleTests(TestCase):
                     "server = ensure_server(slot, target_for_server(get_server('world-0'))); server.files[0]['present']=False; server.visits=3; server.save(); event(server, 'file_deleted', 'Archive proof retained')")
                 run(sys.executable, str(manage), 'shell', '-c', "from game.models import SaveSlot; from game.banking import perform; slot=SaveSlot.objects.get(alias='Archive'); perform(slot, 'loan', 500); perform(slot, 'deposit', 200); slot.save()")
                 run(sys.executable, str(manage), 'shell', '-c', "from game.addresses import ip_for; ip_for('backup-address.internal')")
+                run(sys.executable, str(manage), 'shell', '-c', "from game.models import SaveSlot; from game.assignments import ensure_legacy; from game.mailbox import open_case; slot=SaveSlot.objects.get(alias='Archive'); ensure_legacy(slot); assignment=slot.assignments.get(); assignment.state={'deleted': True, 'clean_exit': True}; assignment.save(); open_case(slot, 'Archive relay', 90, 'Archive trace'); slot.save()")
                 addresses = query('SELECT host, ip FROM game_networkaddress ORDER BY host')
                 identities = query('SELECT template_key, code FROM game_contractidentity ORDER BY template_key')
                 query('CREATE TABLE lifecycle_probe (value text)')
@@ -849,6 +894,9 @@ class DevelopmentDatabaseLifecycleTests(TestCase):
                 self.assertEqual(query("SELECT amount, description FROM game_ledgerentry WHERE description='Archive test receipt'"), [(-90, 'Archive test receipt')])
                 self.assertEqual(query('SELECT reserve_balance, loan_balance, loan_principal, loan_fee FROM game_saveslot'), [(200, 525, 500, 25)])
                 self.assertEqual(query('SELECT count(*) FROM game_bankaction'), [(2,)])
+                self.assertEqual(query("SELECT key, state->>'clean_exit' FROM game_assignment"), [('0-1', 'true')])
+                self.assertEqual(query("SELECT amount, status FROM game_enforcementcase"), [(90, 'unpaid')])
+                self.assertEqual(query("SELECT kind FROM game_mailmessage ORDER BY id"), [('briefing',), ('enforcement',)])
                 self.assertEqual(query("SELECT count(*) FROM game_ledgerentry WHERE account='reserve'"), [(1,)])
                 self.assertEqual(query('SELECT count(*) FROM game_generatedmission'), [(1,)])
                 self.assertEqual(query('SELECT count(*) FROM game_directoryserver'), [(6,)])
@@ -3051,3 +3099,215 @@ class CipherBankTests(APIHelpers, TestCase):
         self.slot.save()
         self.assertEqual(self.bank()['bank']['loan_balance'], 3150)
         self.move('loan', 100, 400)
+
+
+class EmailAndAssignmentTests(APIHelpers, TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user('mail-runner')
+        self.client.force_login(self.user)
+        self.slot = SaveSlot.objects.create(user=self.user, position=1, alias='Courier')
+
+    def inbox(self, **params):
+        response = self.client.get(f'/api/{self.endpoint("mail")}/', params)
+        self.assertEqual(response.status_code, 200, response.content)
+        return response.json()
+
+    def send_mail(self, parent=None, intent='message', attachments=None, status=200, **extra):
+        from uuid import uuid4
+        payload = dict(action='send', identity=self.slot.created_at.isoformat(), request_id=str(uuid4()),
+                       recipient=parent.sender if parent else 'dispatch@broker.internal', subject='Evidence delivery',
+                       body='Please verify this message.', reply_to=parent.pk if parent else None,
+                       intent=intent, attachments=attachments or [])
+        payload.update(extra)
+        return self.post(self.endpoint('mail'), payload, status)
+
+    def expire(self):
+        self.slot.refresh_from_db()
+        self.slot.mission_state.update(trace_started=(timezone.now()-timedelta(seconds=500)).isoformat())
+        self.slot.save()
+        return self.refresh()
+
+    def pay(self, case, status=200, **extra):
+        from uuid import uuid4
+        from .mailbox import LEGAL_ACCOUNT
+        payload = dict(action='settle', identity=self.slot.created_at.isoformat(), request_id=str(uuid4()),
+                       amount=case.amount, recipient=LEGAL_ACCOUNT, case_reference=str(case.reference))
+        payload.update(extra)
+        return self.post(self.endpoint('bank'), payload, status)
+
+    def test_ten_independent_contracts_and_briefings_with_overflow_rejected(self):
+        jobs = self.refresh()['contracts'][:11]
+        for job in jobs[:10]:
+            self.post(self.endpoint('contracts'), dict(action='accept', contract_id=job['id']))
+        result = self.refresh()
+        self.assertEqual(len(result['accepted_contracts']), 10)
+        self.assertEqual(self.slot.mail.filter(kind='briefing').count(), 10)
+        self.assertEqual(result['mail_unread'], 10)
+        self.assertTrue(set(job['id'] for job in jobs[:10]).isdisjoint(job['id'] for job in result['contracts']))
+        self.post(self.endpoint('contracts'), dict(action='accept', contract_id=jobs[10]['id']), 400)
+        for message in self.slot.mail.filter(kind='briefing'):
+            self.assertIn(message.assignment.descriptor['file'], message.body)
+            self.assertIn('Payment:', message.body)
+        self.post(self.endpoint('contracts'), dict(action='abort', contract_id=jobs[0]['id']))
+        self.post(self.endpoint('contracts'), dict(action='accept', contract_id=jobs[10]['id']))
+        self.assertEqual(len(self.refresh()['accepted_contracts']), 10)
+
+    def test_switching_contracts_preserves_each_objective_and_email_pays_only_once(self):
+        self.gain_access()
+        self.cmd('get research.dat'); self.clean_exit()
+        self.slot.refresh_from_db()
+        original_id = self.slot.mission_state['local_file_id']
+        first = self.slot.assignments.get(key='0-0')
+        self.reserve('0-2')
+        self.cmd('scan helix-2.internal'); self.cmd('connect helix-2.internal'); self.cmd('crack 22')
+        self.cmd('rm audit.log'); self.clean_exit()
+        second = self.slot.assignments.get(key='0-2')
+        # Deliver the first job without losing the deletion evidence for the other.
+        result = self.send_mail(first.mail.get(kind='briefing'), 'deliver', [original_id])
+        self.assertIn('Delivery verified', result['message'])
+        self.assertEqual(result['slot']['completed'], 1)
+        first.refresh_from_db(); self.assertEqual(first.status, 'completed')
+        again = self.send_mail(first.mail.get(kind='briefing'), 'deliver', [original_id])
+        self.assertEqual(again['slot']['completed'], 1)
+        result = self.send_mail(second.mail.get(kind='briefing'), 'deliver')
+        self.assertIn('Delivery verified', result['message'])
+        self.assertEqual(result['slot']['completed'], 2)
+        self.assertEqual(result['slot']['accepted_contracts'], [])
+        receipt = self.slot.mail.filter(folder='sent', assignment=second).first()
+        self.assertEqual(receipt.attachments[0]['name'], 'deletion-receipts.json')
+        # Sending an attachment is a copy, not a local disk deletion.
+        self.assertTrue(any(entry['id'] == original_id for entry in result['slot']['local_files']))
+
+    def test_connected_accept_does_not_change_session_or_allow_focus_switch(self):
+        self.gain_access()
+        result = self.reserve('0-2')
+        self.assertTrue(result['authenticated'])
+        self.assertEqual(result['active_contract']['id'], public_code('0-0'))
+        self.post(self.endpoint('contracts'), dict(action='focus', contract_id=public_code('0-2')), 400)
+        self.cmd('get research.dat'); self.clean_exit()
+        result = self.cmd('connect helix-2.internal')
+        self.assertEqual(result['active_contract']['id'], public_code('0-2'))
+        self.assertEqual(self.slot.assignments.get(key='0-0').state['recovered'], True)
+
+    def test_wrong_missing_encrypted_and_removed_attachments_do_not_pay(self):
+        self.gain_access('0-1'); self.cmd('get ledger.enc'); self.clean_exit()
+        self.slot.refresh_from_db()
+        parent = self.slot.assignments.get(key='0-1').mail.get(kind='briefing')
+        file_id = self.slot.mission_state['local_file_id']
+        self.assertIn('attach the recovered', self.send_mail(parent, 'deliver')['message'])
+        self.assertIn('archive is encrypted', self.send_mail(parent, 'deliver', [file_id])['message'])
+        self.assertEqual(self.slot.ledger.filter(description__startswith='Contract payment').count(), 0)
+        self.post(self.endpoint('loadout'), {'action':'buy', 'product_id':'decryptor-1-standard'})
+        self.cmd('decrypt ledger.enc')
+        self.assertIn('Delivery verified', self.send_mail(parent, 'deliver', [file_id])['message'])
+        self.cmd('rm ledger.enc')
+        self.send_mail(parent, 'message', [file_id], status=400)
+        self.assertEqual(self.slot.mail.filter(kind='broker_reply').count(), 3)
+        archived = self.slot.mail.filter(folder='sent', attachments__0__id=file_id).first()
+        self.assertEqual(archived.attachments[0]['name'], 'ledger.enc')
+        self.assertFalse(archived.attachments[0]['encrypted'])
+
+    def test_mail_retry_is_idempotent_and_different_instructions_are_rejected(self):
+        from uuid import uuid4
+        request = str(uuid4())
+        first = self.send_mail(request_id=request)
+        self.assertEqual(first['message'], 'Message sent.')
+        self.send_mail(request_id=request)
+        self.assertEqual(self.slot.mail.filter(folder='sent').count(), 1)
+        self.send_mail(request_id=request, body='Different instructions', status=400)
+        self.send_mail(recipient='real@example.com', status=400)
+        self.send_mail(attachments=['not-on-drive'], status=400)
+
+    def test_completed_trace_requires_manual_transfer_and_email_confirmation(self):
+        self.slot.reputation = 100; self.slot.save()
+        self.gain_access()
+        self.slot.refresh_from_db(); before = self.slot.balance
+        result = self.expire()
+        case = self.slot.enforcement_cases.get()
+        notice = case.mail.get(kind='enforcement')
+        self.assertEqual(result['balance'], before)
+        self.assertEqual(result['reputation'], 40)
+        self.assertIsNone(result['active_contract'])
+        self.assertEqual(case.amount, 90)
+        self.refresh(); self.assertEqual(self.slot.enforcement_cases.count(), 1)
+        self.post(self.endpoint('contracts'), dict(action='accept', contract_id=public_code('0-2')), 400)
+        rejected = self.send_mail(notice, 'confirm')
+        self.assertIn('no matching', rejected['message'])
+        case.refresh_from_db(); self.assertEqual(case.status, 'unpaid')
+        self.pay(case, status=400, amount=case.amount + 1)
+        self.pay(case, status=400, recipient='WRONG-ACCOUNT')
+        result = self.pay(case)
+        self.assertEqual(result['slot']['balance'], before-90)
+        case.refresh_from_db(); self.assertEqual(case.status, 'paid')
+        self.assertIsNotNone(case.payment_reference)
+        self.pay(case) # A new HTTP reference still cannot pay a case twice.
+        self.assertEqual(self.slot.ledger.filter(description__startswith='Meridian Legal').count(), 1)
+        self.post(self.endpoint('contracts'), dict(action='accept', contract_id=public_code('0-2')), 400)
+        confirmed = self.send_mail(notice, 'confirm')
+        self.assertIn('closed', confirmed['message'])
+        case.refresh_from_db(); self.assertEqual(case.status, 'closed')
+        self.post(self.endpoint('contracts'), dict(action='accept', contract_id=public_code('0-2')))
+        self.send_mail(notice, 'confirm')
+        self.assertEqual(self.slot.ledger.filter(description__startswith='Meridian Legal').count(), 1)
+
+    def test_unpaid_cases_do_not_prevent_existing_work_or_grow_offline(self):
+        self.reserve('0-2'); self.gain_access()
+        self.expire()
+        case = self.slot.enforcement_cases.get()
+        case.created_at = timezone.now()-timedelta(days=30); case.save()
+        self.cmd('connect helix-2.internal'); self.cmd('scan helix-2.internal'); self.cmd('crack 22')
+        self.cmd('rm audit.log'); self.clean_exit()
+        self.assertEqual(self.cmd('submit')['completed'], 1)
+        case.refresh_from_db(); self.assertEqual(case.amount, 90)
+        SaveSlot.objects.filter(pk=self.slot.pk).update(balance=0, reserve_balance=500)
+        self.pay(case, status=400)
+        self.assertFalse(self.slot.ledger.filter(description__startswith='Meridian Legal').exists())
+        self.cmd('withdraw 90', 'bank'); self.pay(case)
+
+    def test_dirty_disconnect_issues_notice_but_voluntary_abort_only_has_broker_penalty(self):
+        self.reserve(); self.cmd('abort')
+        self.assertFalse(self.slot.enforcement_cases.exists())
+        self.gain_access('0-2'); self.cmd('disconnect')
+        self.assertEqual(self.slot.enforcement_cases.count(), 1)
+        self.assertTrue(self.slot.mail.filter(kind='enforcement').exists())
+
+    def test_mail_history_paginates_and_mark_read_preserves_old_pages(self):
+        from .mailbox import incoming, BROKER
+        for index in range(55):
+            incoming(self.slot, BROKER, f'Message {index}', 'Archived correspondence')
+        expected = list(self.slot.mail.values_list('id', flat=True))
+        first = self.inbox(); snapshot = first['snapshot']
+        incoming(self.slot, BROKER, 'New mail', 'Arrived after paging')
+        rows = [item['id'] for item in first['messages']]
+        for page in [2,3]:
+            data = self.inbox(page=page, snapshot=snapshot)
+            self.assertTrue(data['has_newer']); rows.extend(item['id'] for item in data['messages'])
+        self.assertEqual(rows, expected)
+        data = self.post(self.endpoint('mail'), dict(action='read', message_id=rows[0], identity=self.slot.created_at.isoformat()))
+        self.assertEqual(data['slot']['mail_unread'], 55)
+        self.assertEqual(self.inbox()['total'], 56)
+
+    def test_save_ownership_restart_and_attachment_archives(self):
+        from .mailbox import incoming, AGENCY
+        other = get_user_model().objects.create_user('other-mail-runner')
+        foreign = SaveSlot.objects.create(user=other, position=1, alias='Foreign')
+        message = incoming(foreign, AGENCY, 'Private notice', 'Private')
+        self.send_mail(message, status=400)
+        self.assertEqual(self.client.get(f'/api/slots/{foreign.pk}/mail/').status_code, 404)
+        self.post(f'slots/{foreign.pk}/mail', {}, 404)
+        self.gain_access(); self.expire()
+        case = self.slot.enforcement_cases.get()
+        from uuid import uuid4
+        self.post(f'slots/{foreign.pk}/bank', dict(action='settle', identity=foreign.created_at.isoformat(), request_id=str(uuid4()), amount=90, recipient='MERIDIAN-LEGAL-001', case_reference=str(case.reference)), 404)
+        identity = self.slot.created_at.isoformat()
+        self.post(self.endpoint('restart'), dict(confirmation='Courier'))
+        self.assertFalse(self.slot.mail.exists()); self.assertFalse(self.slot.assignments.exists()); self.assertFalse(self.slot.enforcement_cases.exists())
+        self.send_mail(identity=identity, status=409)
+
+    def test_legacy_active_contract_is_preserved_and_gets_one_briefing(self):
+        SaveSlot.objects.filter(pk=self.slot.pk).update(active_contract='0-2', mission_state={'deleted':True, 'clean_exit':True})
+        self.refresh(); self.refresh()
+        assignment = self.slot.assignments.get()
+        self.assertEqual(assignment.key, '0-2')
+        self.assertTrue(assignment.state['deleted'])
+        self.assertEqual(assignment.mail.filter(kind='briefing').count(), 1)

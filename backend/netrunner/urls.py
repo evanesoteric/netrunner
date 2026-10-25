@@ -3,6 +3,7 @@ from game import views
 
 urlpatterns = [
     path('api/slots/<int:slot_id>/irc/', views.irc),
+    path('api/slots/<int:slot_id>/bank/', views.bank),
     path('api/session/', views.session),
     path('api/register/', views.register),
     path('api/login/', views.sign_in),

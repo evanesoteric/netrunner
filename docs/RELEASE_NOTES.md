@@ -2,6 +2,10 @@
 
 Historical feature and migration notes. See the [README](../README.md) for the current project overview and [development guide](DEVELOPMENT.md) for setup and maintenance.
 
+## v0.20 — Cipher Bank accounts, credit and complete statements
+
+Cipher Bank now exposes the entire ledger through snapshot-based pagination (25 entries in the page view, 15 per terminal history page). Added reserve transfers, one active fixed-fee loan per save, and partial/full repayment forms and commands. Loan terms are quoted before borrowing: 5% once, rounded up, with no compounding or automatic repayment. Transfers and credit actions record linked account entries and closing balances; retrying a form request cannot move funds twice. Current funds remain the spending balance, while fines can collect from both current and reserve. Migration 0016 preserves existing ledger rows and initializes reserve/debt fields to zero. PostgreSQL backup/restore preserves banking balances, loan terms and request references. Restart clears financial state and rejects stale requests. Investments remain deferred for separate economy design.
+
 ## v0.19 — named systems, Atlas addresses and simulated ping
 
 Contracts now identify organizations and specific server roles. Atlas lists their destinations separately from proxy servers and displays persistent fictional IPv4 addresses. Added terminal `ping` and `resolve`; IPs and exact server names can be used with scan/connect, backdoor jumps and deployment. Pinging is optional, free and opens no remote session; filtered ICMP does not prevent scanning or login. Connection prompts, decoder, trace bar, routing labels and histories use IPs and human-readable names. Legacy hostname aliases, existing server identities, saved routes and evidence remain intact. Migration 0015 adds the persistent address registry; PostgreSQL backups preserve it. Allocation uses documentation ranges first and private 10/8 for larger worlds. No command performs real DNS lookup or sends network probes.

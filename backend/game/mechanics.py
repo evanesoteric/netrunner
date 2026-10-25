@@ -137,11 +137,16 @@ def log(slot, app, message):
     slot.mission_log = (slot.mission_log + [{'app': app, 'text': message}])[-200:]
 
 
-def transact(slot, amount, description):
-    if slot.balance + amount < 0:
+def transact(slot, amount, description, *, account='current', reference=None):
+    field = {'current': 'balance', 'reserve': 'reserve_balance', 'loan': 'loan_balance'}[account]
+    updated = getattr(slot, field) + amount
+    if updated < 0:
         raise GameError('Insufficient CPH.')
-    slot.balance += amount
-    LedgerEntry.objects.create(slot=slot, amount=amount, description=description)
+    if updated > 2_000_000_000:
+        raise GameError('Account balance limit exceeded.')
+    setattr(slot, field, updated)
+    LedgerEntry.objects.create(slot=slot, amount=amount, description=description, account=account,
+                               balance_after=updated, reference=reference)
 
 
 def fail(slot, reason):
@@ -150,9 +155,14 @@ def fail(slot, reason):
         return
     record_failure(slot, job, reason)
     contract_failure = bool(slot.active_contract)
-    fine = min(slot.balance, 90 + job['rank'] * 80)
+    fine = min(slot.balance + slot.reserve_balance, 90 + job['rank'] * 80)
     if fine:
-        transact(slot, -fine, f'Contract failure // {public_code(slot.active_contract, slot)}' if slot.active_contract else f'Intrusion failure // {job["target"]}')
+        description = f'Contract failure // {public_code(slot.active_contract, slot)}' if contract_failure else f'Intrusion failure // {job["target"]}'
+        current_payment = min(slot.balance, fine)
+        if current_payment:
+            transact(slot, -current_payment, description)
+        if fine > current_payment:
+            transact(slot, -(fine - current_payment), description, account='reserve')
     slot.reputation = max(0, slot.reputation - 60)
     if slot.active_contract:
         slot.contract_cooldowns = {**slot.contract_cooldowns, slot.active_contract: (timezone.now() + timedelta(seconds=FAILURE_COOLDOWN)).isoformat()}
@@ -291,7 +301,7 @@ MANUALS = {
     'monitor': 'TRIPWIRE\ntrace — inspect the active trace\nAn owned capable license decodes the embedded trace countdown; no separate process is needed.',
     'rootkit': 'WRAITH // EPIC\ninstall — persist a backdoor on the currently mounted server. Clean initial logs before leaving.\nFuture jump <host> connections bypass proxies and logs.',
     'ransomware': 'ECLIPSE // EPIC\ndeploy <host> — install on the currently mounted amber non-contract server. Maximum 3 instances; payout after 120 seconds; each instance then removes itself.',
-    'bank': 'CIPHER BANK\nbalance — account balance\nhistory — latest 15 ledger entries',
+    'bank': 'CIPHER BANK\nbalance — current, reserve and loan balances\nhistory [page] — full transaction history, 15 entries per page\nloan [amount] — view terms or borrow CPH with a fixed 5% fee\nrepay <amount> — partial or full loan repayment from current funds\ndeposit <amount> — transfer current funds to reserve\nwithdraw <amount> — transfer reserve funds to current\nOne active loan; no compounding or automatic charges. Trace fines can collect from both cash accounts.',
 }
 
 
@@ -362,19 +372,15 @@ def execute(slot, app, raw):
     result = ''
     try:
         if app == 'bank':
-            if verb == 'balance' and not args:
-                result = f'CIPHER CURRENT ACCOUNT // {slot.alias}\nAvailable: {slot.balance:,} CPH'
-            elif verb == 'history' and not args:
-                result = '\n'.join(f'{entry.created_at:%Y-%m-%d %H:%M} UTC  {entry.amount:+} CPH  {entry.description}' for entry in slot.ledger.all()[:15]) or 'No transactions.'
-            else:
-                result = 'Unknown bank command. Read help for the bank manual.'
+            from .banking import bank_command
+            result = bank_command(slot, verb, args)
         elif app == 'terminal':
             result = _shell(slot, verb, args, job)
         else:
             raise GameError('Use the primary terminal for software applets.')
     except (GameError, FilesystemError) as exc:
         result = str(exc)
-        if slot.mission_started:
+        if app == 'terminal' and slot.mission_started:
             slot.mission_state['work'] = slot.mission_state.get('work', 0) + 6
     if slot.remote_host.get('_backdoor'):
         slot.mission_state['dirty'] = False

@@ -2,7 +2,7 @@
 const commands = {
   terminal: ['ping', 'resolve', 'exploit', 'exploits', 'applets', 'use', 'trace', 'install', 'deploy', 'abort', 'accept', 'apps', 'brief', 'cat', 'cd', 'pwd', 'find', 'clear', 'connect', 'contracts', 'decrypt', 'disconnect', 'get', 'help', 'history', 'jump', 'lockpick', 'logcleaner', 'login', 'ls', 'rm', 'route', 'rumors', 'scan', 'status', 'submit'],
   mapper: ['help', 'scan'], decryptor: ['decrypt', 'help'], monitor: ['help', 'trace'],
-  bank: ['balance', 'help', 'history'], rootkit: ['help', 'install'], ransomware: ['deploy', 'help'],
+  bank: ['accounts', 'balance', 'deposit', 'withdraw', 'loan', 'repay', 'help', 'history'], rootkit: ['help', 'install'], ransomware: ['deploy', 'help'],
 }
 function subsequence(query, candidate) {
   let index = 0

@@ -248,3 +248,12 @@ The option selects a deletion mission if `--objective` is omitted. It cannot be 
 Migration 0015 creates `NetworkAddress`, mapping each canonical virtual host to a unique fictional IPv4 address. Addresses are assigned on first lookup and retained in normal PostgreSQL backups. Allocation uses the documentation ranges before falling back to private 10/8; concurrent lookups for one host return the same committed mapping. Requests preload existing mappings to avoid an individual lookup for every directory row.
 
 Keep existing `target`/`address` host keys when authoring or importing saved content. They preserve filesystem state, routes, contract evidence and old command aliases. The API adds `ip_address`, `target_name`, `remote_ip`, `remote_name` and `target_directory` for display. Generated missions include organization and specific server labels; the web client presents these names and the assigned IP rather than requiring legacy `.internal` aliases. Address resolution does not bypass directory visibility, rank checks or ownership of a private mission.
+
+
+### Cipher Bank persistence and statements
+
+Migration 0016 adds reserve and loan fields, ledger account/closing-balance/reference metadata, and a per-save `BankAction` request registry. Existing rows remain current-account entries, with null closing balances rather than reconstructed history. Normal PostgreSQL exports and imports include all banking data.
+
+`GET /api/slots/<id>/bank/` returns account terms and a 25-entry statement page. Pass `page`, `snapshot` (the initial maximum ledger ID), and `identity` to retain a stable view. Owner filtering applies before pagination. `POST` accepts `action` (`loan`, `repay`, `deposit`, `withdraw`), integer `amount`, the returned save `identity`, and a UUID `request_id`. The save row is locked for the complete movement, ledger entries and request record. Identical request replay returns current state without moving funds; conflicting reuse is rejected. Restart changes identity and deletes old references, preventing stale forms from affecting a new runner.
+
+Financial changes use `banking.py` and `mechanics.transact`; amounts are whole CPH. The loan fee is stored once on origination, with no interest scheduler. Tests cover statement snapshots, account conservation, invalid amounts, insufficient funds, fines, repayments, retries, concurrent borrowing, ownership, restart and actual PostgreSQL backup/restore.

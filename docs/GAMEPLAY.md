@@ -74,7 +74,7 @@ Each console has its own `help` manual. Commands run entirely inside the game's 
 | Rosetta | `decrypt <file>` supports remote archives while logged in, or local files while disconnected |
 | Logcleaner | `logcleaner [license-id]` in the local terminal removes remote access logs |
 | Tripwire | `trace` reads the live trace; an owned capable license decodes the embedded countdown without a separate process |
-| Cipher bank | `balance`, `history` display this save's independent account |
+| Cipher bank | `balance`, `history [page]`, `loan`, `repay`, `deposit`, `withdraw` manage this save's accounts |
 
 The trace begins at successful authentication, after Lockpick finishes breaking the password. A connected server login has no active trace. Wall-clock time and simulated computation both consume it. CPU speed and tool speed affect computation time. Gateway stealth and proxy delays extend trace time; gateway bandwidth affects transfers. Hop order changes geographical latency. Connections and equipment changes lock the route while online. Copying a file does not automatically complete a contract: the broker verifies objective evidence and a clean exit before paying a manual submission. Higher security can defeat underpowered tools, encrypted files require a decryptor, and local disk space must fit the recovered archive.
 
@@ -249,3 +249,29 @@ ping "Helix Research Lab: Research Archive"
 A broad organization name can be ambiguous; Atlas lists each specific system. Tab completes known IPs and legacy aliases. Legacy commands such as `scan helix-0.internal` still work, including the older walkthrough examples above. Internally, saved files, backdoors, proxy IDs and histories retain their existing identities; changing the displayed address does not recreate the server.
 
 Addresses persist in PostgreSQL across sessions, restarts and backups. The allocator uses `192.0.2.0/24`, `198.51.100.0/24`, and `203.0.113.0/24` documentation ranges, then private `10.0.0.0/8` for larger worlds. All replies and lookups are simulated locally by the game. No real DNS, ICMP, SSH or HTTP connection is made.
+
+
+## Cipher Bank accounts, loans and complete statements
+
+Each save has its own current account, reserve account and loan balance. Purchases, route leases, compute and repayments use current funds. Transfers to reserve keep money separate from spending; transfer it back when needed. Transfers are free and stay within the same save. Trace and contract fines collect from current funds first, then reserve. Net worth is current + reserve − outstanding loan debt. Cipher Bank stays on its own page without a resident process or Workspace panel.
+
+The bank offers one active loan at a time, with a principal limit of **1,000 + 750 × rank** CPH (1,000 at Ghost, up to 4,000 at Architect) and a minimum of 100 CPH. A fixed **5% fee, rounded up**, is added to debt once. Borrowing 500 CPH credits the full 500 and creates 525 CPH of debt. There is no compounding, due date, offline charge or automatic repayment. Partial repayments are supported; paying off the loan unlocks borrowing again. Existing debt does not change when rank changes. Forms show the fee and total before borrowing.
+
+Use the bank's forms or terminal:
+
+```text
+balance
+loan
+loan 500
+deposit 300
+withdraw 100
+repay 200
+history
+history 2
+```
+
+**All transaction records remain available:** 25 entries per statement page, or 15 per terminal `history [page]`. Statement pages retain a snapshot so incoming entries do not shift records or cause gaps. **Refresh history** starts a new snapshot including newer transactions. Entries identify their account, amount, time and record ID. New entries also record their closing balance; old records retain their original data and show no closing balance when it was not recorded.
+
+Transfers and loan actions create linked entries showing both sides. A positive loan-account amount increases debt; a negative amount records repayment. Loan proceeds are not profit, and transfers do not change net worth. Retrying the same form request cannot move funds twice. Balances, debt, terms, references and complete history are included in PostgreSQL backups. Restarting a runner clears that save's financial state; other saves remain independent.
+
+Investments and fictional stock trading remain a separate design topic. Reserve funds earn no passive yield in this version.

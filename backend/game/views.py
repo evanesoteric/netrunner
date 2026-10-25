@@ -72,7 +72,7 @@ def serialize(slot, detailed=False):
     remaining = tracing if monitor and target and monitor['power'] >= target['security'] else None
     data = {
         'id': slot.id, 'position': slot.position, 'alias': slot.alias, 'created_at': slot.created_at,
-        'balance': slot.balance, 'reputation': slot.reputation, 'rank': slot.rank,
+        'balance': slot.balance, 'reserve_balance': slot.reserve_balance, 'loan_balance': slot.loan_balance, 'reputation': slot.reputation, 'rank': slot.rank,
         'rank_name': RANKS[slot.rank],
         'next_rank_at': THRESHOLDS[slot.rank + 1] if slot.rank + 1 < len(RANKS) else None,
         'rank_floor': THRESHOLDS[slot.rank], 'completed': slot.completed,
@@ -134,14 +134,15 @@ def serialize(slot, detailed=False):
             'ransomware_ops': [dict(entry, ip_address=ip_for(entry['target'])) for entry in slot.ransomware_ops],
             'builtins': list(BUILTIN_APPS.values()), 'relays': [server for server in servers if server['id'] in slot.atlas_nodes], 'network_directory': servers, 'atlas_nodes': slot.atlas_nodes, 'home_node': HOME_NODE,
             'proxy_route': slot.proxy_route, 'route_stats': route_stats(slot),
-            'ledger': list(slot.ledger.values('id', 'amount', 'description', 'created_at')[:30]),
+            'ledger': list(slot.ledger.values('id', 'amount', 'description', 'created_at', 'account', 'balance_after', 'reference')[:30]),
+            'ledger_latest_id': slot.ledger.values_list('id', flat=True).first() or 0,
         })
     return data
 
 @ensure_csrf_cookie
 @api(['GET'], authenticated=False)
 def session(request):
-    return JsonResponse({'user': {'username': request.user.username} if request.user.is_authenticated else None, 'currency': CURRENCY, 'ranks': RANKS, 'version': '0.19.0', 'server_time': timezone.now().isoformat()})
+    return JsonResponse({'user': {'username': request.user.username} if request.user.is_authenticated else None, 'currency': CURRENCY, 'ranks': RANKS, 'version': '0.20.0', 'server_time': timezone.now().isoformat()})
 
 @api(['POST'], authenticated=False)
 def register(request):
@@ -194,7 +195,7 @@ def slots(request):
     try:
         with transaction.atomic():
             slot = SaveSlot.objects.create(user=request.user, position=position, alias=alias)
-            LedgerEntry.objects.create(slot=slot, amount=1200, description='New runner // initial funding')
+            LedgerEntry.objects.create(slot=slot, amount=1200, balance_after=1200, description='New runner // initial funding')
     except IntegrityError:
         raise GameError('This save slot is already occupied.')
     return JsonResponse(serialize(slot, True), status=201)
@@ -310,13 +311,14 @@ def restart(request, slot_id):
     if request.data.get('confirmation') != slot.alias:
         raise GameError('Type the runner alias exactly to confirm restarting this slot.')
     fresh = SaveSlot(user=request.user, alias=slot.alias, position=slot.position)
-    for field in ['balance', 'reputation', 'completed', 'equipment', 'owned_hardware', 'installed_software', 'running_apps', 'proxy_route', 'atlas_nodes', 'active_contract', 'mission_started', 'mission_state', 'local_files', 'exploit_inventory', 'irc_messages', 'irc_state', 'applet_preferences', 'broker_jobs', 'broker_consumed', 'broker_pending', 'broker_codes', 'mission_log', 'contract_cooldowns', 'backdoors', 'ransomware_ops', 'remote_host', 'market_unlocked', 'field_notes', 'notes_revision', 'notes_updated_at', 'workspace_layout', 'workspace_revision']:
+    for field in ['balance', 'reserve_balance', 'loan_balance', 'loan_principal', 'loan_fee', 'loan_started_at', 'reputation', 'completed', 'equipment', 'owned_hardware', 'installed_software', 'running_apps', 'proxy_route', 'atlas_nodes', 'active_contract', 'mission_started', 'mission_state', 'local_files', 'exploit_inventory', 'irc_messages', 'irc_state', 'applet_preferences', 'broker_jobs', 'broker_consumed', 'broker_pending', 'broker_codes', 'mission_log', 'contract_cooldowns', 'backdoors', 'ransomware_ops', 'remote_host', 'market_unlocked', 'field_notes', 'notes_revision', 'notes_updated_at', 'workspace_layout', 'workspace_revision']:
         setattr(slot, field, getattr(fresh, field))
     slot.created_at = timezone.now()
     slot.save()
     slot.ledger.all().delete()
+    slot.bank_actions.all().delete()
     slot.server_states.all().delete()
-    LedgerEntry.objects.create(slot=slot, amount=1200, description='Restarted runner // initial funding')
+    LedgerEntry.objects.create(slot=slot, amount=1200, balance_after=1200, description='Restarted runner // initial funding')
     return JsonResponse(serialize(slot, True))
 
 
@@ -459,3 +461,27 @@ def irc(request, slot_id):
         irc_command(slot, text_field(request.data, 'command', 240))
         slot.save()
     return JsonResponse({'irc': channel_data(slot), 'slot': serialize(slot, True)})
+
+
+@api(['GET', 'POST'])
+@transaction.atomic
+def bank(request, slot_id):
+    from .banking import summary, history, perform
+    slot = SaveSlot.objects.select_for_update().get(pk=slot_id, user=request.user)
+    settle(slot)
+    if request.method == 'POST':
+        if request.data.get('identity') != slot.created_at.isoformat():
+            return JsonResponse({'error': 'This runner was restarted. Refresh the bank before moving funds.'}, status=409)
+        if not request.data.get('request_id'):
+            raise GameError('A transaction reference is required.')
+        result = perform(slot, request.data.get('action'), request.data.get('amount'), request.data['request_id'])
+        slot.save()
+        return JsonResponse({'bank': summary(slot), 'history': history(slot), 'message': result, 'slot': serialize(slot, True)})
+    identity = request.GET.get('identity')
+    if identity and identity != slot.created_at.isoformat():
+        return JsonResponse({'error': 'This runner was restarted. Refresh the bank history.'}, status=409)
+    page = request.GET.get('page', '1')
+    snapshot = request.GET.get('snapshot')
+    if not page.isdecimal() or len(page) > 10 or (snapshot is not None and (not snapshot.isdecimal() or len(snapshot) > 18)):
+        raise GameError('Invalid ledger page or snapshot.')
+    return JsonResponse({'bank': summary(slot), 'history': history(slot, int(page), int(snapshot) if snapshot is not None else None)})

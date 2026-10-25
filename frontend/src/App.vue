@@ -2,6 +2,7 @@
 import { computed, ref, nextTick, onMounted, onUnmounted, watch } from 'vue'
 import { Terminal, Network, BriefcaseBusiness, Cpu, Landmark, Layers3, ArrowUpRight, ArrowRight, ChevronRight, Radio, ShieldCheck, LogOut, Plus, X, Check, Globe, Fingerprint, Activity, Grid2X2, Play, LockKeyhole, NotebookPen } from 'lucide-vue-next'
 import IrcUnderground from './components/IrcUnderground.vue'
+import BankView from './components/BankView.vue'
 import WorkspaceView from './components/WorkspaceView.vue'
 import PasswordBreaker from './components/PasswordBreaker.vue'
 import ModalDialog from './components/ModalDialog.vue'
@@ -150,6 +151,14 @@ async function closeApplication(application, stay = false, expectedSlot = null) 
     return true
   })
 }
+async function bankTransaction(payload, expectedSlot) {
+  if (slot.value?.id !== expectedSlot) return false
+  return act(async () => {
+    const result = await api(`slots/${expectedSlot}/bank/`, payload)
+    updateSlot(result.slot)
+    return result
+  })
+}
 async function sendIrc(command, expectedSlot) {
   if (slot.value?.id !== expectedSlot) return false
   return act(async () => {
@@ -229,7 +238,7 @@ onUnmounted(() => { clearInterval(clock); clearInterval(poller) })
   <div class="app-shell" :inert="loginDialog || !!buildProduct">
     <aside class="sidebar">
       <a class="brand" href="#" @click.prevent="page = 'overview'" aria-label="Netrunner home"><span class="brand-icon"><Terminal :size="23" /></span><span>netrunner<span class="brand-dot">_</span><small>INDEPENDENT NETWORK ACCESS</small></span></a>
-      <div class="workspace-label">WORKSPACE <span>V.0.19</span></div>
+      <div class="workspace-label">WORKSPACE <span>V.0.20</span></div>
       <nav aria-label="Main navigation">
         <button v-for="item in nav" :key="item.id" :aria-label="item.label" :class="['nav-item', { active: page === item.id }]" @click="navigate(item)" :disabled="!slot || busy" :aria-current="page === item.id ? 'page' : undefined"><component :is="item.icon" :size="18" /><span>{{ item.label }}</span><span v-if="item.id === 'broker' && slot" class="nav-count">{{ slot.contracts.length }}</span><span v-if="item.id === 'terminal' && slot?.active_contract" class="live-dot"></span></button>
       </nav>
@@ -287,15 +296,11 @@ onUnmounted(() => { clearInterval(clock); clearInterval(poller) })
             <BlackMarket :slot="slot" :busy="busy" @trade="trade" />
           </template>
           <BackdoorsView v-else-if="page === 'backdoors' && slot.installed_software.includes('rootkit-epic')" :slot="slot" :busy="busy" @connect="jumpBackdoor" />
-          <template v-else-if="page === 'bank'">
-            <div class="eyebrow">SERVICES / CIPHER BANK TERMINAL</div><div class="page-heading"><div><h1>Your money. Off the grid<span>_</span></h1><p>Every route, compute charge, trade, and contract payment has a receipt.</p></div><span class="badge"><LockKeyhole :size="12" /> PRIVATE LEDGER</span></div><section class="bank-hero"><div><span class="micro">CIPHER // CURRENT ACCOUNT</span><h2>{{ money(slot.balance) }} <span>CPH</span></h2><p>Available balance</p></div><div class="bank-account"><Landmark :size="32" :stroke-width="1" /><span>ACCOUNT HOLDER</span><strong>{{ slot.alias }}</strong><small>NR-{{ String(slot.id).padStart(8,'0') }} / SLOT 0{{ slot.position }}</small></div></section>
-            <TerminalConsole :slot="slot" application="bank" :busy="busy" :send="sendCommand" />
-            <section class="panel ledger bank-ledger"><div class="panel-title"><span><Activity :size="16" /> TRANSACTION HISTORY</span><span class="panel-meta">LATEST 30 ENTRIES</span></div><div class="ledger-row" v-for="entry in slot.ledger" :key="entry.id"><div><span class="transaction-icon"><ArrowUpRight :size="16" /></span><strong>{{ entry.description }}</strong></div><time>{{ new Date(entry.created_at).toISOString().slice(0,16).replace('T',' ') }}</time><strong :class="entry.amount > 0 ? 'positive' : 'negative'">{{ entry.amount > 0 ? '+' : '−' }}{{ money(Math.abs(entry.amount)) }} <small>CPH</small></strong></div></section>
-          </template>
+          <BankView v-else-if="page === 'bank'" :key="`${slot.id}:${slot.created_at}`" :slot="slot" :busy="busy" :api="api" :send="sendCommand" :transact="bankTransaction" />
           <KeepAlive><WorkspaceView v-if="page === 'workspace'" ref="workspaceRef" :key="`${user.username}:${slot.id}:${slot.created_at}`" :slot="slot" :username="user.username" :busy="busy" :api="api" :send="sendCommand" :launch="(product, id) => launchApplication(product, true, id)" :close="(app, id) => closeApplication(app, true, id)" :now="now" :offset="serverOffset" :ranks="ranks" :breaker-action="breakerAction" @open-cracker="openCracker" @route="saveRoute" @directory="editDirectory" @trade="trade" @contract="contractAction" @jump="jumpBackdoor" /></KeepAlive>
           <KeepAlive><FieldNotes v-if="page === 'notes'" :key="`${user.username}:${slot.id}:${slot.created_at}`" :slot-id="slot.id" :username="user.username" :api="api" /></KeepAlive>
           <section v-if="slot.ransomware_ops.length" class="panel ransomware-panel"><div class="panel-title"><span>ECLIPSE / ACTIVE INSTANCES</span><span class="panel-meta">{{ slot.ransomware_ops.length }} / 3</span></div><div v-for="operation in slot.ransomware_ops" :key="operation.target" class="ransomware-row"><code>{{ operation.ip_address || operation.target }}</code><span>{{ Math.max(0, Math.ceil((Date.parse(operation.due_at) - now - serverOffset) / 1000)) }}s</span><strong>{{ operation.reward }} CPH</strong></div></section>
-          <div v-if="restartOpen" class="modal-backdrop" @click.self="restartOpen = false"><section class="panel restart-dialog" role="dialog" aria-modal="true" aria-labelledby="restart-title"><div class="panel-title"><span>RUNNER RESTART</span><button class="icon-button" @click="restartOpen = false" aria-label="Cancel restart"><X :size="17" /></button></div><form @submit.prevent="restartRunner"><h2 id="restart-title">Start over in slot 0{{ slot.position }}?</h2><p>This erases {{ slot.alias }}'s balance, reputation, contracts, equipment, routes, local files, notes, server histories, workspace arrangement, and transaction history. Your account and other save slots stay intact.</p><label for="restart-confirmation">TYPE {{ slot.alias }} TO CONFIRM</label><input id="restart-confirmation" v-model="restartConfirmation" autocomplete="off" required /><div class="dialog-actions"><button type="button" class="button secondary" @click="restartOpen = false">Cancel</button><button class="button primary" :disabled="busy || restartConfirmation !== slot.alias">Erase progress and restart</button></div></form></section></div>
+          <div v-if="restartOpen" class="modal-backdrop" @click.self="restartOpen = false"><section class="panel restart-dialog" role="dialog" aria-modal="true" aria-labelledby="restart-title"><div class="panel-title"><span>RUNNER RESTART</span><button class="icon-button" @click="restartOpen = false" aria-label="Cancel restart"><X :size="17" /></button></div><form @submit.prevent="restartRunner"><h2 id="restart-title">Start over in slot 0{{ slot.position }}?</h2><p>This erases {{ slot.alias }}'s current funds, reserve account, loan, reputation, contracts, equipment, routes, local files, notes, server histories, workspace arrangement, and transaction history. Your account and other save slots stay intact.</p><label for="restart-confirmation">TYPE {{ slot.alias }} TO CONFIRM</label><input id="restart-confirmation" v-model="restartConfirmation" autocomplete="off" required /><div class="dialog-actions"><button type="button" class="button secondary" @click="restartOpen = false">Cancel</button><button class="button primary" :disabled="busy || restartConfirmation !== slot.alias">Erase progress and restart</button></div></form></section></div>
         </template>
         <footer><span>NETRUNNER <span class="footer-slash">/</span> A WORLD BEHIND THE FIREWALL</span><span>FICTIONAL NETWORK. INDEPENDENT OPERATORS.<span class="green-dot"></span></span></footer>
       </main>

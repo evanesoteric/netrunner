@@ -27,6 +27,11 @@ class SaveSlot(models.Model):
     position = models.PositiveSmallIntegerField()
     alias = models.CharField(max_length=24)
     balance = models.PositiveIntegerField(default=1200)
+    reserve_balance = models.PositiveIntegerField(default=0)
+    loan_balance = models.PositiveIntegerField(default=0)
+    loan_principal = models.PositiveIntegerField(default=0)
+    loan_fee = models.PositiveIntegerField(default=0)
+    loan_started_at = models.DateTimeField(null=True, blank=True)
     reputation = models.PositiveIntegerField(default=0)
     equipment = models.JSONField(default=starter_equipment)
     owned_hardware = models.JSONField(default=starter_hardware)
@@ -69,6 +74,9 @@ class SaveSlot(models.Model):
 class LedgerEntry(models.Model):
     slot = models.ForeignKey(SaveSlot, on_delete=models.CASCADE, related_name='ledger')
     amount = models.IntegerField()
+    account = models.CharField(max_length=10, choices=[('current', 'Current'), ('reserve', 'Reserve'), ('loan', 'Loan')], default='current')
+    balance_after = models.PositiveIntegerField(null=True, blank=True)
+    reference = models.UUIDField(null=True, blank=True, db_index=True)
     description = models.CharField(max_length=160)
     created_at = models.DateTimeField(auto_now_add=True)
     class Meta:
@@ -129,3 +137,14 @@ class ServerEvent(models.Model):
 class NetworkAddress(models.Model):
     host = models.CharField(max_length=100, unique=True)
     ip = models.GenericIPAddressField(unique=True, null=True, editable=False)
+
+
+class BankAction(models.Model):
+    slot = models.ForeignKey(SaveSlot, on_delete=models.CASCADE, related_name='bank_actions')
+    request_id = models.UUIDField()
+    action = models.CharField(max_length=12)
+    amount = models.PositiveIntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['slot', 'request_id'], name='unique_bank_transaction_request')]

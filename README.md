@@ -64,7 +64,7 @@ Stop with **Ctrl+C**, then `docker compose down`. Start again with `docker compo
 - **Custom rigs:** choose hardware and individual software licenses; manage working RAM, local storage, and applet capabilities.
 - **Contracts and rank:** rise from Ghost to Architect. Jobs are available at your rank, one above, and one below. Some deletion jobs require erasing named backup copies too. Failed contracts carry financial and reputation penalties.
 - **IRC Underground:** join a busy simulated Linux-style channel and trade CPH for lifetime or single-use fingerprint exploits.
-- **Cipher economy:** earn and spend fictional cryptocurrency (CPH), manage a bank account, and trade equipment.
+- **Cipher economy:** earn and spend CPH, move funds to reserve, borrow and repay fixed-fee loans, and browse your complete bank history.
 - **Server exploration:** browse service-specific folders, inspect files, and locate contract evidence among backups and other records.
 - **Persistent worlds:** each save has its own local files, server state, visit history, notes, and saved workspace arrangement.
 - **Hidden discoveries:** uncover the Null Exchange, epic software, backdoors, and ransomware opportunities.
@@ -76,7 +76,7 @@ Stop with **Ctrl+C**, then `docker compose down`. Start again with `docker compo
 | Desktop | View your rig, runner status, and current assignment. |
 | Workspace | Arrange the primary terminal, Atlas, and personal panels; layouts save across sessions. |
 | Contract broker | Browse, accept, and abort contracts. |
-| Cipher bank | Check your balance and transaction history. |
+| Cipher bank | Manage current and reserve funds, borrow or repay a loan, and browse the full paginated ledger. |
 | Atlas network | Discover servers, manage map bookmarks, and build proxy routes. |
 | Applications | Open system pages and select owned applet licenses for the primary terminal. |
 | IRC Underground | Chat with bot traders, buy fingerprint exploits with CPH, and review your exploit stash. |

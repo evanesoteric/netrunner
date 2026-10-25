@@ -555,6 +555,40 @@ class ConcurrentEconomyTests(APIHelpers, TransactionTestCase):
         self.assertEqual(self.slot.completed, 1)
         self.assertEqual(self.slot.ledger.count(), 1)
 
+    def test_duplicate_bank_requests_move_funds_once(self):
+        from uuid import uuid4
+        data = self.client.get(f'/api/slots/{self.slot.pk}/bank/').json()
+        results = self.parallel_post('bank', dict(action='deposit', amount=400, identity=data['bank']['identity'], request_id=str(uuid4())))
+        self.assertEqual(results, [200, 200])
+        self.slot.refresh_from_db()
+        self.assertEqual((self.slot.balance, self.slot.reserve_balance), (800, 400))
+        self.assertEqual(self.slot.bank_actions.count(), 1)
+        self.assertEqual(self.slot.ledger.count(), 2)
+
+    def test_simultaneous_different_loans_allow_only_one_active_loan(self):
+        from uuid import uuid4
+        from .banking import perform
+        from .mechanics import GameError
+        def borrow(_):
+            close_old_connections()
+            try:
+                with transaction.atomic():
+                    slot = SaveSlot.objects.select_for_update().get(pk=self.slot.pk)
+                    try:
+                        perform(slot, 'loan', 1000, str(uuid4()))
+                    except GameError:
+                        return False
+                    slot.save()
+                    return True
+            finally:
+                close_old_connections()
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(borrow, range(2)))
+        self.assertCountEqual(results, [True, False])
+        self.slot.refresh_from_db()
+        self.assertEqual((self.slot.balance, self.slot.loan_balance), (2200, 1050))
+        self.assertEqual(self.slot.ledger.count(), 2)
+
     def test_concurrent_submissions_only_pay_once(self):
         self.slot.active_contract = '0-0'
         self.slot.local_files = [dict(id='proof', name='research.dat', size=24, source='helix-0.internal', source_path='research.dat')]
@@ -789,6 +823,7 @@ class DevelopmentDatabaseLifecycleTests(TestCase):
                     "from game.models import SaveSlot; from game.world import get_server, target_for_server; from game.persistence import ensure_server, event; "
                     "slot = SaveSlot.objects.get(alias='Archive'); slot.field_notes='Archive notebook: follow the old relay'; slot.notes_revision=2; slot.workspace_layout=[dict(id='terminal', product_id='terminal', x=1, y=2, w=9, h=6)]; slot.workspace_revision=4; slot.local_files=[dict(id='backup-file', name='archive.dat', size=12, source='backup.internal', source_path='archive.dat')]; slot.save(); "
                     "server = ensure_server(slot, target_for_server(get_server('world-0'))); server.files[0]['present']=False; server.visits=3; server.save(); event(server, 'file_deleted', 'Archive proof retained')")
+                run(sys.executable, str(manage), 'shell', '-c', "from game.models import SaveSlot; from game.banking import perform; slot=SaveSlot.objects.get(alias='Archive'); perform(slot, 'loan', 500); perform(slot, 'deposit', 200); slot.save()")
                 run(sys.executable, str(manage), 'shell', '-c', "from game.addresses import ip_for; ip_for('backup-address.internal')")
                 addresses = query('SELECT host, ip FROM game_networkaddress ORDER BY host')
                 identities = query('SELECT template_key, code FROM game_contractidentity ORDER BY template_key')
@@ -810,8 +845,11 @@ class DevelopmentDatabaseLifecycleTests(TestCase):
                 self.assertEqual(query('SELECT * FROM lifecycle_probe'), [('backup survives',)])
                 self.assertEqual(query('SELECT template_key, code FROM game_contractidentity ORDER BY template_key'), identities)
                 self.assertEqual(query('SELECT host, ip FROM game_networkaddress ORDER BY host'), addresses)
-                self.assertEqual(query('SELECT alias, balance, reputation, active_contract FROM game_saveslot'), [('Archive', 842, 130, '0-1')])
-                self.assertEqual(query('SELECT amount, description FROM game_ledgerentry'), [(-90, 'Archive test receipt')])
+                self.assertEqual(query('SELECT alias, balance, reputation, active_contract FROM game_saveslot'), [('Archive', 1142, 130, '0-1')])
+                self.assertEqual(query("SELECT amount, description FROM game_ledgerentry WHERE description='Archive test receipt'"), [(-90, 'Archive test receipt')])
+                self.assertEqual(query('SELECT reserve_balance, loan_balance, loan_principal, loan_fee FROM game_saveslot'), [(200, 525, 500, 25)])
+                self.assertEqual(query('SELECT count(*) FROM game_bankaction'), [(2,)])
+                self.assertEqual(query("SELECT count(*) FROM game_ledgerentry WHERE account='reserve'"), [(1,)])
                 self.assertEqual(query('SELECT count(*) FROM game_generatedmission'), [(1,)])
                 self.assertEqual(query('SELECT count(*) FROM game_directoryserver'), [(6,)])
                 self.assertEqual(query('SELECT field_notes, notes_revision FROM game_saveslot'), [('Archive notebook: follow the old relay', 2)])
@@ -2856,3 +2894,160 @@ class ConcurrentAddressTests(TransactionTestCase):
             first, second = list(pool.map(allocate, [('batch-a.internal', 'batch-b.internal'), ('batch-b.internal', 'batch-a.internal')]))
         self.assertEqual(first, second)
         self.assertEqual(len(set(first.values())), 2)
+
+
+class CipherBankTests(APIHelpers, TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user('bank-runner')
+        self.client.force_login(self.user)
+        self.slot = SaveSlot.objects.create(user=self.user, position=1, alias='Banker')
+        from .models import LedgerEntry
+        LedgerEntry.objects.create(slot=self.slot, amount=1200, description='New runner // initial funding')
+
+    def bank(self, **query):
+        from urllib.parse import urlencode
+        result = self.client.get(f'/api/{self.endpoint("bank")}/?{urlencode(query)}')
+        self.assertEqual(result.status_code, 200, result.content)
+        return result.json()
+
+    def move(self, action, amount, status=200, **extra):
+        from uuid import uuid4
+        payload = dict(action=action, amount=amount, identity=self.slot.created_at.isoformat(), request_id=str(uuid4()))
+        payload.update(extra)
+        return self.post(self.endpoint('bank'), payload, status)
+
+    def test_entire_statement_is_paginated_without_gaps_when_new_rows_arrive(self):
+        from .models import LedgerEntry
+        LedgerEntry.objects.bulk_create([LedgerEntry(slot=self.slot, amount=1, description=f'Historical payment {index}') for index in range(68)])
+        expected = list(self.slot.ledger.values_list('id', flat=True))
+        first = self.bank()
+        snapshot = first['history']['snapshot']
+        self.assertEqual(first['history']['total'], 69)
+        self.assertEqual(first['history']['pages'], 3)
+        LedgerEntry.objects.create(slot=self.slot, amount=1, description='Arrived while browsing')
+        collected = [entry['id'] for entry in first['history']['entries']]
+        for page in [2, 3]:
+            data = self.bank(page=page, snapshot=snapshot)
+            self.assertTrue(data['history']['has_newer'])
+            collected.extend(entry['id'] for entry in data['history']['entries'])
+        self.assertEqual(collected, expected)
+        self.assertEqual(len(set(collected)), 69)
+        self.assertEqual(self.bank()['history']['total'], 70)
+        self.assertEqual(self.bank()['history']['entries'][0]['description'], 'Arrived while browsing')
+        self.assertEqual(first['history']['entries'][-1]['account'], 'current')
+        self.assertEqual(self.client.get(f'/api/{self.endpoint("bank")}/?page=0').status_code, 400)
+        self.assertEqual(self.client.get(f'/api/{self.endpoint("bank")}/?page=999').status_code, 400)
+
+    def test_loan_terms_partial_repayment_and_full_payoff(self):
+        data = self.move('loan', 500)
+        self.assertEqual(data['bank']['current_balance'], 1700)
+        self.assertEqual(data['bank']['loan_balance'], 525)
+        self.assertEqual(data['bank']['loan_fee'], 25)
+        self.assertEqual(data['bank']['net_worth'], 1175)
+        self.move('loan', 100, 400)
+        data = self.move('repay', 200)
+        self.assertEqual(data['bank']['loan_balance'], 325)
+        data = self.move('repay', 325)
+        self.assertEqual(data['bank']['loan_balance'], 0)
+        self.assertEqual(data['bank']['current_balance'], 1175)
+        self.assertEqual(data['bank']['loan_principal'], 0)
+        self.assertIsNone(data['bank']['loan_started_at'])
+        self.assertEqual(self.slot.ledger.filter(account='loan').count(), 3)
+        for entry in self.slot.ledger.exclude(reference=None):
+            self.assertEqual(self.slot.ledger.filter(reference=entry.reference).count(), 2)
+            self.assertIsNotNone(entry.balance_after)
+        self.assertEqual(self.move('loan', 100)['bank']['loan_balance'], 105)
+
+    def test_transfers_conserve_assets_and_do_not_auto_fund_purchases(self):
+        data = self.move('deposit', 1100)
+        self.assertEqual(data['bank']['current_balance'], 100)
+        self.assertEqual(data['bank']['reserve_balance'], 1100)
+        self.assertEqual(data['bank']['net_worth'], 1200)
+        self.post(self.endpoint('loadout'), {'action':'buy', 'product_id':'cpu-1-standard'}, 400)
+        data = self.move('withdraw', 200)
+        self.assertEqual(data['bank']['current_balance'], 300)
+        self.assertEqual(data['bank']['reserve_balance'], 900)
+        self.assertEqual(data['bank']['net_worth'], 1200)
+        self.assertEqual(sum(self.slot.ledger.exclude(reference=None).values_list('amount', flat=True)), 0)
+
+    def test_fines_collect_current_then_reserve(self):
+        self.move('deposit', 1190)
+        self.reserve()
+        result = self.cmd('abort')
+        self.assertEqual(result['balance'], 0)
+        self.assertEqual(result['reserve_balance'], 1110)
+        self.assertEqual(self.slot.ledger.filter(description__startswith='Contract failure').count(), 2)
+
+    def test_invalid_amounts_and_insufficient_funds_leave_all_accounts_unchanged(self):
+        before = self.slot.ledger.count()
+        for action, amount in [('deposit', 1201), ('withdraw', 1), ('loan', 99), ('loan', 1001), ('repay', 1), ('deposit', -1), ('deposit', 0), ('deposit', True), ('loan', 1.5), ('deposit', '100')]:
+            self.move(action, amount, 400)
+        self.slot.refresh_from_db()
+        self.assertEqual((self.slot.balance, self.slot.reserve_balance, self.slot.loan_balance), (1200, 0, 0))
+        self.assertEqual(self.slot.ledger.count(), before)
+        self.assertFalse(self.slot.bank_actions.exists())
+        self.move('loan', 100)
+        self.move('repay', 106, 400)
+        self.move('deposit', 1300)
+        count = self.slot.ledger.count()
+        self.move('repay', 100, 400)
+        self.assertEqual(self.slot.ledger.count(), count)
+
+    def test_request_replay_is_idempotent_and_conflicting_reuse_is_rejected(self):
+        from uuid import uuid4
+        reference = str(uuid4())
+        first = self.move('deposit', 400, request_id=reference)
+        replay = self.move('deposit', 400, request_id=reference)
+        self.assertEqual(first['bank'], replay['bank'])
+        self.assertEqual(self.slot.bank_actions.count(), 1)
+        self.assertEqual(self.slot.ledger.count(), 3)
+        self.move('deposit', 401, 400, request_id=reference)
+        self.assertEqual(self.slot.ledger.count(), 3)
+
+    def test_restart_resets_banking_and_rejects_stale_requests(self):
+        identity = self.slot.created_at.isoformat()
+        self.move('loan', 500)
+        self.move('deposit', 300)
+        data = self.post(self.endpoint('restart'), {'confirmation':'Banker'})
+        self.assertEqual((data['balance'], data['reserve_balance'], data['loan_balance']), (1200, 0, 0))
+        self.assertFalse(self.slot.bank_actions.exists())
+        self.move('deposit', 100, 409, identity=identity)
+        self.assertEqual(self.slot.ledger.count(), 1)
+        self.assertEqual(self.client.get(f'/api/{self.endpoint("bank")}/?identity={identity}').status_code, 409)
+
+    def test_owner_checks_apply_to_statements_and_transfers(self):
+        other = get_user_model().objects.create_user('other-bank-owner')
+        slot = SaveSlot.objects.create(user=other, position=1, alias='Other')
+        self.assertEqual(self.client.get(f'/api/slots/{slot.pk}/bank/').status_code, 404)
+        self.post(f'slots/{slot.pk}/bank', {'action':'loan','amount':100}, 404)
+
+    def test_bank_terminal_reaches_old_history_and_uses_the_same_accounts(self):
+        from .models import LedgerEntry
+        LedgerEntry.objects.bulk_create([LedgerEntry(slot=self.slot, amount=1, description=f'Old receipt {index}') for index in range(35)])
+        self.assertIn('Page 3/3', self.cmd('history 3', 'bank')['mission_log'][-1]['text'])
+        self.assertIn('initial funding', self.cmd('history 3', 'bank')['mission_log'][-1]['text'])
+        self.cmd('loan 500', 'bank')
+        self.cmd('deposit 300', 'bank')
+        self.cmd('withdraw 100', 'bank')
+        data = self.cmd('repay 100', 'bank')
+        self.assertEqual((data['balance'], data['reserve_balance'], data['loan_balance']), (1400, 200, 425))
+        self.assertEqual(data['running_apps'], [])
+
+    def test_loan_fee_rounds_once_and_does_not_grow_offline(self):
+        from unittest.mock import patch
+        self.move('loan', 101)
+        with patch('django.utils.timezone.now', return_value=timezone.now() + timedelta(days=7)):
+            data = self.bank()
+        self.assertEqual(data['bank']['loan_balance'], 107)
+        self.assertEqual(data['bank']['loan_fee'], 6)
+
+    def test_rank_changes_credit_limit_without_rewriting_existing_debt(self):
+        self.slot.reputation = 500
+        self.slot.save()
+        self.assertEqual(self.bank()['bank']['loan_limit'], 3250)
+        self.move('loan', 3000)
+        self.slot.refresh_from_db()
+        self.slot.reputation = 0
+        self.slot.save()
+        self.assertEqual(self.bank()['bank']['loan_balance'], 3150)
+        self.move('loan', 100, 400)

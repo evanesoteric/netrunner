@@ -144,7 +144,7 @@ class SimulationTests(APIHelpers, TestCase):
         listed = self.refresh()
         self.assertEqual(listed['rank_name'], 'Ghost')
         self.assertEqual({job['rank'] for job in listed['contracts']}, {0, 1})
-        self.assertEqual(len(listed['contracts']), 24)
+        self.assertEqual(len(listed['contracts']), 27)
         for job in listed['contracts']:
             with self.subTest(contract_id=job['id']):
                 SaveSlot.objects.filter(pk=self.slot.pk).update(active_contract='', mission_state={})
@@ -173,8 +173,8 @@ class SimulationTests(APIHelpers, TestCase):
         first = self.refresh()['contracts']
         self.assertEqual(first, self.refresh()['contracts'])
         numbers = list(ContractIdentity.objects.values_list('code', flat=True))
-        self.assertEqual(len(numbers), 60)
-        self.assertEqual(len(set(numbers)), 60)
+        self.assertEqual(len(numbers), 63)
+        self.assertEqual(len(set(numbers)), 63)
         self.assertTrue(all(0 <= number <= 255 for number in numbers))
         self.assertTrue(all(job['id'].isdigit() for job in first))
 
@@ -538,6 +538,23 @@ class ConcurrentEconomyTests(APIHelpers, TransactionTestCase):
         with ThreadPoolExecutor(max_workers=2) as pool:
             return list(pool.map(run, range(2)))
 
+    def test_concurrent_erase_all_submissions_only_pay_once(self):
+        from .persistence import ensure_server
+        job = CONTRACT_BY_ID['purge-0']
+        server = ensure_server(self.slot, job)
+        for entry in server.files:
+            if entry['name'] in job['delete_paths']:
+                entry['present'] = False
+        server.save()
+        self.slot.active_contract = job['id']
+        self.slot.mission_state = dict(deleted=True, deletion_receipts=job['delete_paths'], clean_exit=True)
+        self.slot.save()
+        self.assertEqual(self.parallel_post('command', {'application': 'terminal', 'command': 'submit'}), [200, 200])
+        self.slot.refresh_from_db()
+        self.assertEqual(self.slot.balance, 1200 + job['reward'])
+        self.assertEqual(self.slot.completed, 1)
+        self.assertEqual(self.slot.ledger.count(), 1)
+
     def test_concurrent_submissions_only_pay_once(self):
         self.slot.active_contract = '0-0'
         self.slot.local_files = [dict(id='proof', name='research.dat', size=24, source='helix-0.internal', source_path='research.dat')]
@@ -819,7 +836,7 @@ class GeneratedWorldTests(APIHelpers, TestCase):
         self.assertEqual(len(set(job['target'] for job in jobs)), 3)
         self.assertEqual(len(set(public_code(job['id']) for job in jobs)), 3)
         listed = self.refresh()['contracts']
-        self.assertEqual(len(listed), 27)
+        self.assertEqual(len(listed), 30)
         for job in jobs:
             response = self.reserve(public_code(job['id']))
             self.assertEqual(response['active_contract']['target'], job['target'])
@@ -1844,7 +1861,7 @@ class FreshBrokerTests(APIHelpers, TestCase):
     def test_accept_removes_offer_and_due_replacement_has_new_identity_target_and_artifact(self):
         original = next(job for job in self.refresh()['contracts'] if job['target']=='helix-0.internal')
         accepted = self.reserve()
-        self.assertEqual(len(accepted['contracts']),23)
+        self.assertEqual(len(accepted['contracts']),26)
         self.assertNotIn(original['target'],[job['target'] for job in accepted['contracts']])
         self.slot.refresh_from_db()
         self.slot.broker_pending[0]['due_at']=(timezone.now()-timedelta(seconds=1)).isoformat()
@@ -1854,7 +1871,7 @@ class FreshBrokerTests(APIHelpers, TestCase):
         self.assertNotEqual(new['file'], original['file'])
         self.assertNotEqual(new['id'], original['id'])
         self.assertEqual(updated['active_contract']['target'], original['target'])
-        self.assertEqual(len(self.refresh()['contracts']),24)
+        self.assertEqual(len(self.refresh()['contracts']),27)
         self.slot.refresh_from_db()
         self.assertEqual(len(self.slot.broker_jobs),1)
 
@@ -2222,7 +2239,7 @@ class ExpandedServiceTests(APIHelpers, TestCase):
     def test_every_service_has_a_starter_affordable_contract_without_exploits(self):
         from .services import SERVICES
         seen = set()
-        jobs = [job for job in CONTRACT_BY_ID.values() if job['rank'] == 0 and not job['encrypted']]
+        jobs = [job for job in CONTRACT_BY_ID.values() if job['rank'] == 0 and not job['encrypted'] and not job.get('delete_paths')]
         for job in jobs:
             with self.subTest(service=job['service'], contract=job['id']):
                 # Each case starts with a normal runner's starter funding and tools.
@@ -2562,3 +2579,144 @@ class PopulatedFilesystemMigrationTests(TransactionTestCase):
         finally:
             executor = MigrationExecutor(connection)
             executor.migrate(executor.loader.graph.leaf_nodes())
+
+
+class EraseAllCopiesTests(APIHelpers, TestCase):
+    def setUp(self):
+        user = get_user_model().objects.create_user('copy-cleaner')
+        self.client.force_login(user)
+        self.slot = SaveSlot.objects.create(user=user, position=1, alias='Cleaner')
+
+    def mount(self, key='purge-0'):
+        self.reserve(key)
+        job = CONTRACT_BY_ID.get(key)
+        if not job:
+            self.slot.refresh_from_db()
+            job = self.slot.broker_jobs[self.slot.active_contract]
+        self.cmd(f'scan {job["target"]}')
+        self.cmd(f'connect {job["target"]}')
+        return self.cmd(f'crack {job["port"]}')
+
+    def test_three_authored_jobs_have_real_named_primary_and_backup_copies(self):
+        from .filesystem import build_tree
+        jobs = [job for job in CONTRACT_BY_ID.values() if job.get('delete_paths')]
+        self.assertEqual(len(jobs), 3)
+        self.assertEqual({job['service'] for job in jobs}, {'ssh', 'wordpress', 'rdp'})
+        for job in jobs:
+            files = build_tree(job)
+            self.assertIn(len(job['delete_paths']), (2, 3))
+            for path in job['delete_paths']:
+                self.assertTrue(next(entry for entry in files if entry['name'] == path)['present'])
+                self.assertIn('/' + path, job['description'])
+            self.assertFalse(any(entry['name'].startswith('backup/reference/') for entry in files))
+
+    def test_primary_only_is_rejected_then_remaining_backup_receipt_completes_job(self):
+        self.mount()
+        data = self.cmd('rm /root/audit.txt')
+        self.assertIn('Required copies: 1/2', data['mission_log'][-1]['text'])
+        self.assertEqual([copy['deleted'] for copy in data['deletion_progress']], [True, False])
+        self.clean_exit()
+        rejected = self.cmd('submit')
+        self.assertIn('/bak/audit.log', rejected['mission_log'][-1]['text'])
+        self.assertEqual(rejected['completed'], 0)
+        self.assertFalse(self.slot.ledger.filter(description__startswith='Contract payment').exists())
+        self.cmd('connect ashfall-audit.internal')
+        self.cmd('crack 22')
+        self.cmd('cd /bak')
+        data = self.cmd('rm ./audit.log')
+        self.assertIn('Required copies: 2/2', data['mission_log'][-1]['text'])
+        self.assertTrue(all(copy['deleted'] for copy in data['deletion_progress']))
+        self.clean_exit()
+        paid = self.cmd('submit')
+        self.assertEqual(paid['completed'], 1)
+        self.assertIn('Delivery verified', paid['mission_log'][-1]['text'])
+        self.cmd('submit')
+        self.assertEqual(self.slot.ledger.filter(description__startswith='Contract payment').count(), 1)
+
+    def test_backup_first_and_unrelated_deletion_do_not_replace_primary_requirement(self):
+        self.mount('purge-1')
+        data = self.cmd('rm /backup/previous.dat')
+        self.assertFalse(any(copy['deleted'] for copy in data['deletion_progress']))
+        data = self.cmd('rm /backup/nightly/users.db')
+        self.assertEqual([copy['deleted'] for copy in data['deletion_progress']], [False, True])
+        self.clean_exit()
+        self.assertIn('/var/www/users.db', self.cmd('submit')['mission_log'][-1]['text'])
+        self.cmd('connect juniper-cms.internal')
+        self.cmd('crack 443')
+        self.cmd('rm /var/www/users.db')
+        self.assertIn('Cannot deliver evidence while connected', self.cmd('submit')['mission_log'][-1]['text'])
+        self.clean_exit()
+        self.assertIn('Delivery verified', self.cmd('submit')['mission_log'][-1]['text'])
+
+    def test_three_copy_rdp_job_requires_every_path(self):
+        self.slot.installed_software += ['mapper-2-standard', 'cracker-2-standard', 'cleaner-2-standard']
+        self.slot.save()
+        self.mount('purge-2')
+        paths = CONTRACT_BY_ID['purge-2']['delete_paths']
+        for index, path in enumerate(reversed(paths), 1):
+            data = self.cmd(f'rm /{path}')
+            self.assertEqual(sum(copy['deleted'] for copy in data['deletion_progress']), index)
+        self.clean_exit()
+        self.assertIn('Delivery verified', self.cmd('submit')['mission_log'][-1]['text'])
+
+    def test_restored_copies_invalidate_old_receipts_after_maintenance(self):
+        self.mount()
+        for path in CONTRACT_BY_ID['purge-0']['delete_paths']:
+            self.cmd(f'rm /{path}')
+        self.clean_exit()
+        server = self.slot.server_states.get(address='ashfall-audit.internal')
+        server.maintenance_due = timezone.now() - timedelta(seconds=1)
+        server.save()
+        data = self.refresh()
+        self.assertTrue(all(not copy['deleted'] for copy in data['deletion_progress']))
+        self.assertIn('/archive/r2/bak/audit.log', self.cmd('submit')['mission_log'][-1]['text'])
+        self.cmd('connect ashfall-audit.internal')
+        self.cmd('scan ashfall-audit.internal')
+        self.cmd('crack 2222')
+        for path in CONTRACT_BY_ID['purge-0']['delete_paths']:
+            self.cmd(f'rm /archive/r2/{path}')
+        self.clean_exit()
+        self.assertIn('Delivery verified', self.cmd('submit')['mission_log'][-1]['text'])
+
+    def test_receipt_flags_cannot_pay_for_copies_that_still_exist(self):
+        self.mount()
+        self.clean_exit()
+        self.slot.refresh_from_db()
+        self.slot.mission_state.update(deleted=True, deletion_receipts=CONTRACT_BY_ID['purge-0']['delete_paths'])
+        self.slot.save()
+        self.assertIn('deletion proof missing', self.cmd('submit')['mission_log'][-1]['text'])
+        self.assertFalse(self.slot.ledger.filter(description__startswith='Contract payment').exists())
+
+    @override_settings(DEBUG=True)
+    def test_offline_generator_authors_multiple_backup_paths_and_rejects_invalid_jobs(self):
+        from .models import GeneratedMission
+        call_command('generate_content', 'missions', count=1, service='ssh', filename='audit.txt', artifact_dir='/root', delete_copy=['/bak/audit.log', '/backup/audit.txt'], stdout=StringIO())
+        job = GeneratedMission.objects.get().data
+        self.assertEqual(job['objective'], 'delete')
+        self.assertEqual(job['delete_paths'], ['root/audit.txt', 'bak/audit.log', 'backup/audit.txt'])
+        self.assertIn('/bak/audit.log', job['description'])
+        for options in [dict(objective='retrieve'), dict(encrypted=True), dict(delete_copy=['relative']), dict(delete_copy=['/']),
+                        dict(delete_copy=['/root/audit.txt']), dict(delete_copy=['/bak/audit.log', '/bak/./audit.log']), dict(delete_copy=['/backup']),
+                        dict(delete_copy=[f'/bak/{n}.log' for n in range(5)])]:
+            settings = dict(count=1, filename='audit.txt', artifact_dir='/root', delete_copy=['/bak/audit.log'], stdout=StringIO())
+            settings.update(options)
+            with self.assertRaises(CommandError):
+                call_command('generate_content', 'missions', **settings)
+        self.assertEqual(GeneratedMission.objects.count(), 1)
+
+    def test_broker_replacement_retains_copy_requirements_with_fresh_paths(self):
+        self.reserve('purge-0')
+        self.cmd('abort')
+        self.slot.refresh_from_db()
+        self.slot.broker_pending[0]['due_at'] = (timezone.now() - timedelta(seconds=1)).isoformat()
+        self.slot.save()
+        new = next(job for job in self.refresh()['contracts'] if job['target'].startswith('broker-'))
+        self.assertEqual(len(new['delete_paths']), 2)
+        self.assertEqual(new['service'], 'ssh')
+        self.assertTrue(set(new['delete_paths']).isdisjoint(CONTRACT_BY_ID['purge-0']['delete_paths']))
+        self.assertIn('erase all copies', new['title'])
+        self.mount(new['id'])
+        for path in new['delete_paths']:
+            self.cmd(f'rm /{path}')
+        self.clean_exit()
+        self.assertIn('Delivery verified', self.cmd('submit')['mission_log'][-1]['text'])

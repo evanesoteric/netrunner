@@ -224,3 +224,20 @@ bash scripts/generate-content.sh missions --count 3 --rank 0 --service mysql --p
 `--filename` accepts a basename (up to 64 characters), and `--artifact-dir` accepts an absolute virtual directory (up to 70 characters). An explicit directory overrides random placement. These options apply only to missions. The authoring command prints the actual artifact path for review; the broker shows the filename without exposing the hidden directory. Target addresses and contract identities remain unique even when multiple missions use the same filename.
 
 Templates and service paths live in `backend/game/filesystem.py`; terminal actions live in `backend/game/remote_files.py`. Each tree stays bounded, and paths are normalized entirely inside the game's JSON filesystem. No file command invokes the host shell or operates on real paths.
+
+
+### Authoring erase all copies contracts
+
+Add `--delete-copy /absolute/file/path` to require an additional backup deletion. Repeat it for up to four backups (five required files including the primary). Follow the [offline generation prerequisites](#offline-content-generation) first.
+
+```bash
+bash scripts/generate-content.sh missions --count 1 --rank 0 --service ssh --objective delete --filename audit.txt --artifact-dir /root --delete-copy /bak/audit.log
+bash scripts/generate-content.sh missions --count 1 --rank 0 --service wordpress --objective delete --filename users.db --artifact-dir /var/www --delete-copy /backup/nightly/users.db
+```
+
+```powershell
+.\scripts\generate-content.ps1 missions --count 1 --rank 0 --service ssh --objective delete --filename audit.txt --artifact-dir /root --delete-copy /bak/audit.log
+.\scripts\generate-content.ps1 missions --count 1 --rank 0 --service wordpress --objective delete --filename users.db --artifact-dir /var/www --delete-copy /backup/nightly/users.db
+```
+
+The option selects a deletion mission if `--objective` is omitted. It cannot be combined with retrieval, encryption, or directory-server generation. Every required file path must be distinct and cannot conflict with a directory. The generator creates the actual required copies and puts their exact paths in the broker brief. It does not make every other backup on that server an objective. Requirements, file states and per-path receipts persist in PostgreSQL and normal backups.

@@ -551,7 +551,14 @@ def _shell(slot, verb, args, job):
     if verb == 'brief' and not args:
         if not slot.active_contract:
             raise GameError('No reserved contract.')
-        return f'{public_code(job["id"], slot)} // {job["description"]}\nTarget: {job["target"]}. Reward: {job["reward"]} CPH.'
+        result = f'{public_code(job["id"], slot)} // {job["description"]}\nTarget: {job["target"]}. Reward: {job["reward"]} CPH.'
+        if job.get('delete_paths'):
+            from .deletion import required_paths, missing_deletions
+            server = slot.server_states.filter(address=job['target']).first()
+            files = server.files if server else []
+            missing = missing_deletions(job, files, state.get('deletion_receipts', []))
+            result += '\nERASE ALL COPIES\n' + '\n'.join(f'{"PENDING" if path in missing else "DELETED"} /{path}' for path in required_paths(job, files))
+        return result
     if verb == 'abort' and not args:
         if not slot.active_contract:
             raise GameError('No reserved contract. Use disconnect to leave this server.')
@@ -565,6 +572,12 @@ def _shell(slot, verb, args, job):
         local_copy = next((entry for entry in slot.local_files if entry['id'] == state.get('local_file_id')), None)
         if job['objective'] == 'retrieve' and local_copy and local_copy.get('encrypted'):
             raise GameError('Broker rejected delivery: archive is encrypted. Decrypt the local copy with Rosetta first.')
+        if job.get('delete_paths'):
+            from .deletion import missing_deletions
+            server = ensure_server(slot, job)
+            missing = missing_deletions(job, server.files, state.get('deletion_receipts', []))
+            if missing:
+                raise GameError('Broker rejected delivery: deletion proof missing for required copies:\n' + '\n'.join('/' + path for path in missing))
         fulfilled = (state.get('recovered') and local_copy) if job['objective'] == 'retrieve' else state.get('deleted')
         if not fulfilled or not state.get('clean_exit'):
             raise GameError('Broker rejected delivery: objective or clean exit evidence missing.')

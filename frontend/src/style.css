@@ -47,3 +47,5 @@
 .irc-members summary{cursor:pointer;color:#91a195;line-height:1.9}.irc-members[open] summary{margin-bottom:10px}.irc-members>div{max-height:140px;overflow:auto;line-height:2.2}.irc-messages .irc-drop{border-left:2px solid #ff6875;padding-left:10px;color:#ff9aa4}.irc-messages .irc-drop strong{color:#ff6875}.irc-messages .irc-drop time{color:#c07d85}
 
 .command-line label{max-width:50%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+.deletion-checklist{flex-basis:100%;list-style:none;padding:14px 0 0;margin:0;border-top:1px solid var(--line);font:11px/2 var(--mono);color:var(--muted)}.deletion-checklist li{overflow-wrap:anywhere}.deletion-checklist .done{color:var(--green)}

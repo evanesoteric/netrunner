@@ -4,7 +4,8 @@ import uuid
 from django.conf import settings
 from django.core.management import BaseCommand, CommandError
 from django.db import transaction, connection
-from game.filesystem import artifact_path, absolute
+from game.filesystem import artifact_path, absolute, build_tree, FilesystemError
+from game.deletion import description as deletion_description
 from game.services import SERVICES, service_fields
 from game.models import DirectoryServer, GeneratedMission, ContractIdentity
 
@@ -21,6 +22,7 @@ class Command(BaseCommand):
         parser.add_argument('--filename', help='Mission filename only, e.g. users.db.')
         parser.add_argument('--service', choices=list(SERVICES), help='Choose a service fingerprint family; otherwise vary services randomly.')
         parser.add_argument('--objective', choices=['retrieve', 'delete'], help='Choose a mission objective instead of random selection.')
+        parser.add_argument('--delete-copy', action='append', default=[], metavar='/PATH', help='Require deletion of this backup too; repeat for up to four backup files.')
         parser.add_argument('--encrypted', action='store_true', help='Generate encrypted retrieval missions.')
         parser.add_argument('--exploitable', action='store_true', help='Mark generated servers as ransomware targets.')
 
@@ -33,7 +35,7 @@ class Command(BaseCommand):
             raise CommandError('Choose a count from 1 to 100.')
         if options['exploitable'] and options['kind'] != 'servers':
             raise CommandError('--exploitable applies only to servers.')
-        if options['kind'] == 'servers' and (options['objective'] or options['encrypted']):
+        if options['kind'] == 'servers' and (options['objective'] or options['encrypted'] or options['delete_copy']):
             raise CommandError('--objective and --encrypted apply only to missions.')
         if options['kind'] == 'servers' and (options['filename'] or options['artifact_dir'] or options['placement'] != 'mixed'):
             raise CommandError('--filename, --artifact-dir and --placement apply only to missions.')
@@ -41,6 +43,10 @@ class Command(BaseCommand):
             raise CommandError('Use a filename of at most 64 characters without directories or control characters.')
         if options['artifact_dir'] and (not options['artifact_dir'].startswith('/') or len(options['artifact_dir']) > 70 or any(ord(char) < 32 for char in options['artifact_dir'])):
             raise CommandError('Use an absolute virtual artifact directory of at most 70 characters.')
+        if options['delete_copy'] and (options['objective'] == 'retrieve' or options['encrypted']):
+            raise CommandError('--delete-copy requires an unencrypted deletion mission.')
+        if len(options['delete_copy']) > 4 or any(not path.startswith('/') or len(path) > 135 or any(ord(char) < 32 for char in path) or absolute(path) == '/' for path in options['delete_copy']):
+            raise CommandError('Use up to four absolute backup file paths, each at most 135 characters.')
         if options['objective'] == 'delete' and options['encrypted']:
             raise CommandError('Encrypted missions must use the retrieve objective.')
         with connection.cursor() as cursor:
@@ -68,7 +74,7 @@ class Command(BaseCommand):
                 created.append(f'{data["name"]} / {address}')
             else:
                 key, address = token[:12], 'mission-' + token[:16] + '.internal'
-                objective = options['objective'] or ('retrieve' if options['encrypted'] else rng.choice(['retrieve', 'delete']))
+                objective = options['objective'] or ('delete' if options['delete_copy'] else 'retrieve' if options['encrypted'] else rng.choice(['retrieve', 'delete']))
                 encrypted = options['encrypted'] or (options['objective'] is None and objective == 'retrieve' and rng.choice([True, False]))
                 filename = options['filename'] or (f'{token[:6]}.enc' if encrypted else 'users.db' if service['service'] == 'wordpress' else f'{token[:6]}.dat')
                 description = f'{"Recover" if objective == "retrieve" else "Remove"} {filename} from {address}. Leave no access logs and submit proof through the broker.'
@@ -78,6 +84,18 @@ class Command(BaseCommand):
                             reputation=35 + rank * 10, description=description, x=x, y=y)
                 nested = options['placement'] == 'nested' or (options['placement'] == 'mixed' and rng.random() < .3)
                 data['artifact_path'] = (absolute(options['artifact_dir'] + '/' + filename).lstrip('/') if options['artifact_dir'] else artifact_path(data, nested=nested))
+                if options['delete_copy']:
+                    paths = [data['artifact_path'], *[absolute(path).lstrip('/') for path in options['delete_copy']]]
+                    if len(set(paths)) != len(paths):
+                        raise CommandError('Each required deletion path must be distinct, including the primary file.')
+                    data['delete_paths'] = paths
+                    data['title'] += ' // erase all copies'
+                    data['description'] = deletion_description(data)
+                    data['reward'] += 100 * len(options['delete_copy'])
+                try:
+                    build_tree(data)
+                except FilesystemError as error:
+                    raise CommandError(str(error))
                 GeneratedMission.objects.create(key=key, data=data)
                 ContractIdentity.objects.create(template_key=key, code=allocated[index])
                 created.append(f'Contract {allocated[index]} / {data["title"]} / {address} / artifact: /{data["artifact_path"]}')

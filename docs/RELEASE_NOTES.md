@@ -2,6 +2,10 @@
 
 Historical feature and migration notes. See the [README](../README.md) for the current project overview and [development guide](DEVELOPMENT.md) for setup and maintenance.
 
+## v0.18 — erase all copies contracts
+
+Added three authored deletion jobs: Ashfall audit (SSH), Juniper CMS (WordPress), and Glasshouse ledger (RDP). These briefs name two or three exact files, including backups. The active broker card and terminal brief track per-path receipts; payment requires all named files deleted and a clean exit. Partial deletion, unrelated files and restored copies do not qualify. Ordinary single-file jobs retain their existing rules. Fresh broker replacements preserve the multi-copy requirement while changing host and filenames. The offline generator now accepts repeatable `--delete-copy` paths; examples are in the development guide. Existing save data needs no schema migration; startup hooks allocate public IDs for the new templates.
+
 ## v0.17 — populated remote filesystems
 
 Every server now has a persistent virtual directory tree with service-specific application files, logs, configuration, notes, backups and reference copies. Added `ls [path]`, `cd`, `pwd`, `cat` and `find`, plus discovered-path Tab completion and working-directory prompts. Some contract artifacts remain at root; others live in folders such as `/var/www`, `/Users/admin/Documents` or database data directories. Scans no longer reveal nested artifact locations. Any file can be copied or deleted, but only the exact objective path produces broker proof; same-named reference files do not count. File previews and downloads never touch the host filesystem. Directory browsing adds bounded trace work without new CPH fees.

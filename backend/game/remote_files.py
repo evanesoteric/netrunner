@@ -3,6 +3,7 @@ import math
 import fnmatch
 import posixpath
 from .filesystem import absolute, directory_exists, listing, resolve_file, FilesystemError
+from .deletion import required_paths
 from .persistence import ensure_server, observe, record_action
 
 
@@ -66,9 +67,15 @@ def command(slot, verb, args, target):
         record_action(slot, actual, 'file_deleted', f'{entry["name"]} removed from the remote filesystem.', delete=True)
         state['dirty'] = True
         state['known_paths'] = [known for known in state.get('known_paths', []) if known['path'] != absolute(entry['name'])]
-        if primary:
+        required = required_paths(target, server.files)
+        if entry['name'] in required:
+            receipts = set(state.get('deletion_receipts', [])) | {entry['name']}
+            state['deletion_receipts'] = sorted(receipts)
+            state['deleted'] = set(required).issubset(receipts)
+            return f'{entry["name"]} removed. Deletion receipt stored locally. Required copies: {len(set(required) & receipts)}/{len(required)}.'
+        if primary and not required:
             state['deleted'] = True
-        return f'{entry["name"]} removed. Deletion receipt stored locally.' if primary else f'{entry["name"]} removed.'
+        return f'{entry["name"]} removed. Deletion receipt stored locally.' if primary and not required else f'{entry["name"]} removed.'
     raise FilesystemError('Unknown filesystem command.')
 
 

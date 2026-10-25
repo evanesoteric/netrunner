@@ -1,6 +1,7 @@
 """The fictional world's public product, relay, and contract catalogs."""
 from .services import service_fields
 from .filesystem import artifact_path
+from .deletion import description as deletion_description
 
 CURRENCY = {'name': 'Cipher', 'symbol': 'CPH'}
 RANKS = ['Ghost', 'Signal', 'Operator', 'Spectre', 'Architect']
@@ -132,5 +133,21 @@ for tier, (client, target, family, location) in enumerate([
         CONTRACTS.append({'id': f'{tier}-{index}', 'rank': tier, 'title': f'{family} // {"sealed archive" if encrypted else "quiet removal" if objective == "delete" else "recovery"}', 'client': client, 'target': f'{target}-{index}.internal', 'reward': 220 + tier * 200 + (index % 3) * 80, 'reputation': 35 + tier * 10, 'description': f'{"Remove" if objective == "delete" else "Recover"} {filename} from {target}-{index}.internal. {"The archive is encrypted. " if encrypted else ""}Leave no remote access logs and deliver proof through the broker.', 'objective': objective, 'file': filename, 'encrypted': encrypted, 'security': tier + 1, **service_fields(service), 'size': 24 + tier * 32 + (16 if encrypted else 0), 'x': location[0] + (index % 3) * 8, 'y': location[1] + (index % 3) * 8})
 for job in CONTRACTS:
     job['artifact_path'] = artifact_path(job, nested=job['service'] in {'wordpress', 'rdp', 'ftp', 'mysql'})
+
+# A few authored, explicit multi-file jobs rather than changing ordinary deletion.
+for key, title, host, rank, service, paths, reward, reputation, x, y in [
+    ('purge-0', 'Ashfall audit // erase all copies', 'ashfall-audit.internal', 0, 'ssh',
+     ['root/audit.txt', 'bak/audit.log'], 420, 45, 390, 170),
+    ('purge-1', 'Juniper CMS // erase all copies', 'juniper-cms.internal', 0, 'wordpress',
+     ['var/www/users.db', 'backup/nightly/users.db'], 460, 45, 580, 210),
+    ('purge-2', 'Glasshouse ledger // erase all copies', 'glasshouse-ledger.internal', 1, 'rdp',
+     ['Users/admin/Documents/client-ledger.db', 'Users/admin/Documents/Archive/client-ledger.bak', 'backup/workstations/client-ledger.db'], 760, 65, 780, 160),
+]:
+    job = dict(id=key, title=title, target=host, rank=rank, client='Independent broker', security=rank + 1,
+               objective='delete', file=paths[0].rsplit('/', 1)[-1], artifact_path=paths[0], delete_paths=paths,
+               encrypted=False, size=24 + rank * 32, reward=reward, reputation=reputation, x=x, y=y,
+               **service_fields(service))
+    job['description'] = deletion_description(job)
+    CONTRACTS.append(job)
 
 CONTRACT_BY_ID = {job['id']: job for job in CONTRACTS}

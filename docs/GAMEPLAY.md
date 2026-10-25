@@ -175,7 +175,7 @@ Contract targets and public directory servers now include eleven service familie
 
 These are fictional service profiles and simulated access adapters, not real vulnerability or exploit implementations. Each service supports the same **scan → Lockpick → admin login** route. Paid exploits remain optional shortcuts. The service name does not increase the authentication class or require a different cracker purchase. All new Ghost-level service contracts are unencrypted and can be completed with starter software and funding; higher classes still need appropriately capable tools as before. Exploit prices continue to use the existing class/revision formula.
 
-The broker has 60 built-in contract templates, including the original 15. A fresh Ghost sees 24 offers across Ghost and Signal. Briefs show the service family and available access routes. Replacement jobs vary their service family while retaining the source contract's security class, objective and payout. Generated content can also select any supported service.
+The broker has 63 built-in contract templates, including the original 15. A fresh Ghost sees 27 offers across Ghost and Signal. Briefs show the service family and available access routes. Replacement jobs vary their service family while retaining the source contract's security class, objective and payout. Generated content can also select any supported service.
 
 Scans reveal the full fingerprint, including application release, authentication class and patch revision. **An HTTP exploit does not match WordPress or PHP just because all three use port 443.** A WordPress 6.4 license does not match a 6.5 service. IRC's service filter lists each family; scanning a different release or later patch adds matching intelligence to the trade board. Owned legacy SSH, HTTP and RDP licenses keep working on their matching fingerprints. Existing discovered server profiles remain durable across reconnects and updates.
 
@@ -207,3 +207,18 @@ Browsing is part of the challenge. The running trace still advances in real time
 You can download or delete ordinary files too. A same-named file in `/backup/reference` is a reference copy and does **not** satisfy a contract. Only downloading or deleting the real objective at its exact path records evidence. Downloading unrelated files later does not overwrite valid proof. Local copies with the same basename receive suffixes such as `_2`, and all copies use your local drive capacity. While disconnected, use `ls`, `rm <local-name>` or `decrypt <local-name>` to manage them.
 
 Filesystem changes persist per save. Existing saves retain the objective's original location and deletion/encryption state when background files are added. Administrator maintenance restores the tree and moves the objective under `/archive/rN/`; the service folders and background records remain available. Scans do not expose the full directory tree. The operator journal retains file metadata discovered through filesystem actions.
+
+
+## Erase all copies contracts
+
+Three authored contracts require deleting the main file and specific backup copies. They appear in the ordinary broker according to rank, with the **ERASE ALL COPIES** objective and each required path named in the brief:
+
+| Contract | Rank / service | Required files |
+| --- | --- | --- |
+| Ashfall audit | Ghost / SSH | `/root/audit.txt`, `/bak/audit.log` |
+| Juniper CMS | Ghost / WordPress | `/var/www/users.db`, `/backup/nightly/users.db` |
+| Glasshouse ledger | Signal / RDP | `/Users/admin/Documents/client-ledger.db`, `/Users/admin/Documents/Archive/client-ledger.bak`, `/backup/workstations/client-ledger.db` |
+
+Use the normal scan and login workflow, delete each named file with `rm`, clean the remote logs, disconnect and `submit`. The active broker card and terminal `brief` track each receipt. Copy order does not matter, and receipts survive clean disconnects. You can return for remaining files; removing only the primary file does not qualify for payment. All copies must still be deleted when the broker verifies submission. If administrator maintenance restores them, old receipts do not qualify for the restored files.
+
+Only the listed paths are required. Ordinary single-file deletion jobs still require just their objective file; unrelated logs, backups and reference copies need not be removed. Replacement assignments retain the multiple-copy requirement but use fresh hosts, filenames and paths.

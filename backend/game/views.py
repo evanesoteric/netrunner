@@ -45,6 +45,16 @@ def text_field(data, key, maximum):
         raise GameError(f'{key.capitalize()} must contain 1–{maximum} characters.')
     return value.strip()
 
+def deletion_progress(slot, job):
+    if not job or not job.get('delete_paths'):
+        return []
+    from .deletion import required_paths, missing_deletions
+    server = slot.server_states.filter(address=job['target']).first()
+    files = server.files if server else []
+    missing = missing_deletions(job, files, slot.mission_state.get('deletion_receipts', []))
+    return [dict(path='/' + path, deleted=path not in missing) for path in required_paths(job, files)]
+
+
 def serialize(slot, detailed=False):
     from .exploits import inventory
     mapping = codes(slot)
@@ -62,6 +72,7 @@ def serialize(slot, detailed=False):
         'next_rank_at': THRESHOLDS[slot.rank + 1] if slot.rank + 1 < len(RANKS) else None,
         'rank_floor': THRESHOLDS[slot.rank], 'completed': slot.completed,
         'active_contract': public_job(job, mapping),
+        'deletion_progress': deletion_progress(slot, job),
         'broker_next_at': min((entry['due_at'] for entry in slot.broker_pending), default=None),
         'connected': bool(slot.mission_started),
         'authenticated': bool(slot.mission_started and slot.mission_state.get('access')),
@@ -122,7 +133,7 @@ def serialize(slot, detailed=False):
 @ensure_csrf_cookie
 @api(['GET'], authenticated=False)
 def session(request):
-    return JsonResponse({'user': {'username': request.user.username} if request.user.is_authenticated else None, 'currency': CURRENCY, 'ranks': RANKS, 'version': '0.17.0', 'server_time': timezone.now().isoformat()})
+    return JsonResponse({'user': {'username': request.user.username} if request.user.is_authenticated else None, 'currency': CURRENCY, 'ranks': RANKS, 'version': '0.18.0', 'server_time': timezone.now().isoformat()})
 
 @api(['POST'], authenticated=False)
 def register(request):

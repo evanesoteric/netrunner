@@ -5,6 +5,7 @@ from uuid import uuid4
 from secrets import choice
 from .services import SERVICES, service_fields
 from .filesystem import artifact_path
+from .deletion import description as deletion_description
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
@@ -59,7 +60,15 @@ def settle_broker(slot):
                'x': 220 + int(nonce[1:4],16)%640, 'y': 120 + int(nonce[4:7],16)%230}
         job.update(service_fields(list(SERVICES)[int(nonce[7:9], 16) % len(SERVICES)]))
         job['artifact_path'] = artifact_path(job, nested=int(nonce[9], 16) < 5)
+        if template.get('delete_paths'):
+            job.update(service_fields(template['service']))
+            job['delete_paths'] = [str(PurePosixPath(path).with_name(f'{PurePosixPath(path).stem}_{nonce[:6]}{PurePosixPath(path).suffix}')) for path in template['delete_paths']]
+            job['artifact_path'] = job['delete_paths'][0]
+            job['file'] = PurePosixPath(job['artifact_path']).name
+            job['title'] = f'{job["title"].split(" // ")[0]} // erase all copies'
         job['description'] = f'{"Recover" if job["objective"] == "retrieve" else "Delete"} {job["file"]} from {job["target"]}. Leave no remote access logs and deliver proof through the broker.' + (' The archive is encrypted.' if job['encrypted'] else '')
+        if job.get('delete_paths'):
+            job['description'] = deletion_description(job)
         slot.broker_jobs = {**slot.broker_jobs, job['id']: job}
         changed = True
     if changed:

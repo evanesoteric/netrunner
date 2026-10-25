@@ -68,9 +68,16 @@ def build_tree(target, existing=None, revision=1):
     entries = {primary['name']: primary}
     for item in old[1:]:
         entries[absolute(item['name']).lstrip('/')] = dict(item)
+    for source in target.get('delete_paths', []):
+        original = absolute(source).lstrip('/')
+        name = f'archive/r{revision}/{original}' if revision > 1 and not old else original
+        if name not in entries:
+            entries[name] = dict(name=name, original=original, type='file', size=target['size'], encrypted=False,
+                                 present=True, contract_copy=True, content='Current retained copy. This exact file is included in the deletion brief.\n')
     files = {**COMMON, **SERVICE_FILES.get(service_key(target), {})}
     # A similarly named reference copy makes exact paths matter for evidence.
-    files[f'backup/reference/{posixpath.basename(target["file"])}'] = 'Reference copy from a prior export; not current production evidence.\n'
+    if not target.get('delete_paths'):
+        files[f'backup/reference/{posixpath.basename(target["file"])}'] = 'Reference copy from a prior export; not current production evidence.\n'
     for name, text in files.items():
         if name not in entries:
             entries[name] = dict(name=name, original=name, type='file', size=rng.randint(1, 4), encrypted=False, present=True, content=text)
@@ -81,6 +88,8 @@ def build_tree(target, existing=None, revision=1):
             parents.add(parent)
             parent = posixpath.dirname(parent)
     for name in sorted(parents):
+        if name in entries and entries[name].get('type') != 'directory':
+            raise FilesystemError(f'File path conflicts with a directory: /{name}')
         if name not in entries:
             entries[name] = dict(name=name, type='directory', size=0, encrypted=False, present=True)
     return list(entries.values())

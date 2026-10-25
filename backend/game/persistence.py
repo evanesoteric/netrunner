@@ -6,6 +6,7 @@ from .world import session_target
 from .services import service_key, SERVICES, UNKNOWN_SERVICE
 
 from .filesystem import build_tree, LAYOUT_VERSION, absolute
+from .deletion import required_paths
 import posixpath
 
 MAINTENANCE_SECONDS = 600
@@ -46,7 +47,8 @@ def effective_target(slot, target):
             'security': server.security, 'port': server.port,
             'file': artifact['name'] if artifact else target['file'],
             'encrypted': artifact['encrypted'] if artifact else target['encrypted'],
-            'file_present': bool(artifact and artifact['present']), 'server_revision': server.revision}
+            'file_present': bool(artifact and artifact['present']), 'server_revision': server.revision,
+            **({'delete_paths': required_paths(server.descriptor, server.files)} if server.descriptor.get('delete_paths') else {})}
 
 
 def current_target(slot):

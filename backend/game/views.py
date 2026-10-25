@@ -14,6 +14,7 @@ from .world import all_contracts, get_contract, all_servers
 from .models import SaveSlot, LedgerEntry
 from .persistence import current_target
 from .services import service_name
+from .addresses import address_scope, prime_addresses, ip_for, target_name
 from .catalog import CURRENCY, RANKS, THRESHOLDS, PRODUCTS, BUILTIN_APPS, HOME_NODE
 from .mechanics import GameError, hardware, ram_used, route_stats, available_at, trace_remaining, settle, launch, trade, validate_route, execute, edit_directory, reserve, fail, storage_used, monitor_tool, select_applet
 
@@ -29,7 +30,8 @@ def api(methods, authenticated=True):
                 request.data = json.loads(request.body or b'{}') if request.method == 'POST' else {}
                 if not isinstance(request.data, dict):
                     raise GameError('Expected a JSON object.')
-                return fn(request, *args, **kwargs)
+                with address_scope():
+                    return fn(request, *args, **kwargs)
             except (GameError, ValidationError) as exc:
                 return JsonResponse({'error': ' '.join(exc.messages) if isinstance(exc, ValidationError) else str(exc)}, status=400)
             except (ValueError, TypeError, UnicodeDecodeError):
@@ -57,6 +59,9 @@ def deletion_progress(slot, job):
 
 def serialize(slot, detailed=False):
     from .exploits import inventory
+    from .broker import offered_jobs
+    jobs = offered_jobs(slot) if detailed else []
+    prime_addresses([entry['target'] for entry in jobs] + [entry['target'] for entry in slot.backdoors])
     mapping = codes(slot)
     servers = all_servers(slot)
     monitor = monitor_tool(slot)
@@ -82,11 +87,13 @@ def serialize(slot, detailed=False):
         'password_break': slot.mission_state.get('password_break') if slot.mission_started else None,
         'password_result': slot.mission_state.get('password_result') if slot.mission_started else None,
         'login_service': {'port': target['port'], 'security': target['security'], 'name': service_name(target)} if target and slot.mission_started and slot.mission_state.get('scanned') and slot.mission_state.get('scanned_host') == target['target'] and slot.mission_state.get('scanned_revision', 1) == target.get('server_revision', 1) else None,
+        'remote_ip': ip_for(target['target']) if target and slot.mission_started else None,
+        'remote_name': target_name(target) if target and slot.mission_started else None,
         'remote_cwd': slot.mission_state.get('cwd', '/') if slot.mission_started and slot.mission_state.get('access') else None,
         'remote_entries': slot.mission_state.get('known_paths', []) if slot.mission_started and slot.mission_state.get('access') else [],
         'remote_target': target['target'] if target and slot.mission_started else None,
         'stealth_session': bool(slot.remote_host.get('_backdoor')),
-        'remote_node': {key: target[key] for key in ('target', 'x', 'y')} if target and slot.mission_started else None,
+        'remote_node': {**{key: target[key] for key in ('target', 'x', 'y')}, 'target_name': target_name(target), 'ip_address': ip_for(target['target'])} if target and slot.mission_started else None,
         'market_unlocked': slot.market_unlocked,
         'mission_log': slot.mission_log,
         'trace_remaining': remaining,
@@ -98,12 +105,13 @@ def serialize(slot, detailed=False):
     if detailed:
         contracts = []
         from .broker import offered_jobs
-        for job in offered_jobs(slot):
+        for job in jobs:
             if abs(job['rank'] - slot.rank) <= 1:
                 ready = available_at(slot, job['id'])
                 contracts.append({**public_job(job, mapping), 'available_at': ready.isoformat() if ready else None})
         data.update({
             'contracts': contracts,
+            'target_directory': [dict(id='destination-' + item['id'], name=item['target_name'], operator=item.get('organization', item['target_name']), address=item['target'], ip_address=item['ip_address'], category='Contract target', location='Private network', rank=item['rank'], service_name=item['service_name'], destination=True, contract_id=item['id']) for item in [*contracts, *([public_job(get_contract(slot.active_contract, slot), mapping)] if slot.active_contract else [])]],
             'workspace_layout': slot.workspace_layout,
             'workspace_revision': slot.workspace_revision,
             'equipment': hardware(slot),
@@ -122,8 +130,8 @@ def serialize(slot, detailed=False):
             'ram_used': ram_used(slot),
             'catalog': [item for item in PRODUCTS.values() if not item.get('black_market') or item['id'] in slot.installed_software],
             'black_market_catalog': [item for item in PRODUCTS.values() if item.get('black_market')] if slot.market_unlocked else [],
-            'backdoors': [{key: value for key, value in entry.items() if key in {'target', 'name', 'title', 'rank', 'server_id', 'security', 'port'}} for entry in slot.backdoors] if 'rootkit-epic' in slot.installed_software else [],
-            'ransomware_ops': slot.ransomware_ops,
+            'backdoors': [dict({key: value for key, value in entry.items() if key in {'target', 'name', 'title', 'rank', 'server_id', 'security', 'port'}}, ip_address=ip_for(entry['target']), target_name=target_name(entry)) for entry in slot.backdoors] if 'rootkit-epic' in slot.installed_software else [],
+            'ransomware_ops': [dict(entry, ip_address=ip_for(entry['target'])) for entry in slot.ransomware_ops],
             'builtins': list(BUILTIN_APPS.values()), 'relays': [server for server in servers if server['id'] in slot.atlas_nodes], 'network_directory': servers, 'atlas_nodes': slot.atlas_nodes, 'home_node': HOME_NODE,
             'proxy_route': slot.proxy_route, 'route_stats': route_stats(slot),
             'ledger': list(slot.ledger.values('id', 'amount', 'description', 'created_at')[:30]),
@@ -133,7 +141,7 @@ def serialize(slot, detailed=False):
 @ensure_csrf_cookie
 @api(['GET'], authenticated=False)
 def session(request):
-    return JsonResponse({'user': {'username': request.user.username} if request.user.is_authenticated else None, 'currency': CURRENCY, 'ranks': RANKS, 'version': '0.18.0', 'server_time': timezone.now().isoformat()})
+    return JsonResponse({'user': {'username': request.user.username} if request.user.is_authenticated else None, 'currency': CURRENCY, 'ranks': RANKS, 'version': '0.19.0', 'server_time': timezone.now().isoformat()})
 
 @api(['POST'], authenticated=False)
 def register(request):
@@ -388,7 +396,7 @@ def server_history(request, slot_id):
     slot = SaveSlot.objects.select_for_update().get(pk=slot_id, user=request.user)
     settle(slot)
     servers = list(slot.server_states.all())
-    summaries = [dict(address=server.address, name=server.descriptor.get('name') or server.descriptor.get('title') or server.address,
+    summaries = [dict(address=server.address, name=target_name(server.descriptor), ip_address=ip_for(server.address),
                       revision=server.revision, visits=server.visits, last_visit=server.last_visit,
                       observed=server.observed, remote_log_count=len(server.remote_logs),
                       backdoor_installed=server.backdoor_installed, maintenance_due=server.maintenance_due)

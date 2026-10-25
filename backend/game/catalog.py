@@ -150,4 +150,13 @@ for key, title, host, rank, service, paths, reward, reputation, x, y in [
     job['description'] = deletion_description(job)
     CONTRACTS.append(job)
 
+for job in CONTRACTS:
+    if job['id'].startswith('purge-'):
+        identities = {'purge-0': ('Ashfall Audit Services', 'Audit Archive'), 'purge-1': ('Juniper Publishing', 'Customer Database'), 'purge-2': ('Glasshouse Financial', 'Staff Workstation')}
+        job['organization'], job['server_name'] = identities[job['id']]
+    else:
+        tier, index = map(int, job['id'].split('-'))
+        job['organization'] = ['Helix Research Lab', 'Meridian National Bank', 'Aegis Security Labs', 'Citadel Communications', 'Oracle Data Cooperative'][tier]
+        job['server_name'] = ['Research Archive', 'Financial Archive', 'Audit Server', 'Publishing Platform', 'Legacy Web Application', 'Desktop File Server', 'Voice Records', 'Terminal Controller', 'Transfer Archive', 'Mail Server', 'Customer Database', 'Cache Server'][index]
+
 CONTRACT_BY_ID = {job['id']: job for job in CONTRACTS}

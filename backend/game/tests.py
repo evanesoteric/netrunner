@@ -789,6 +789,8 @@ class DevelopmentDatabaseLifecycleTests(TestCase):
                     "from game.models import SaveSlot; from game.world import get_server, target_for_server; from game.persistence import ensure_server, event; "
                     "slot = SaveSlot.objects.get(alias='Archive'); slot.field_notes='Archive notebook: follow the old relay'; slot.notes_revision=2; slot.workspace_layout=[dict(id='terminal', product_id='terminal', x=1, y=2, w=9, h=6)]; slot.workspace_revision=4; slot.local_files=[dict(id='backup-file', name='archive.dat', size=12, source='backup.internal', source_path='archive.dat')]; slot.save(); "
                     "server = ensure_server(slot, target_for_server(get_server('world-0'))); server.files[0]['present']=False; server.visits=3; server.save(); event(server, 'file_deleted', 'Archive proof retained')")
+                run(sys.executable, str(manage), 'shell', '-c', "from game.addresses import ip_for; ip_for('backup-address.internal')")
+                addresses = query('SELECT host, ip FROM game_networkaddress ORDER BY host')
                 identities = query('SELECT template_key, code FROM game_contractidentity ORDER BY template_key')
                 query('CREATE TABLE lifecycle_probe (value text)')
                 query("INSERT INTO lifecycle_probe VALUES ('backup survives')")
@@ -807,6 +809,7 @@ class DevelopmentDatabaseLifecycleTests(TestCase):
                 run(sys.executable, str(manage), 'prepare_dev')
                 self.assertEqual(query('SELECT * FROM lifecycle_probe'), [('backup survives',)])
                 self.assertEqual(query('SELECT template_key, code FROM game_contractidentity ORDER BY template_key'), identities)
+                self.assertEqual(query('SELECT host, ip FROM game_networkaddress ORDER BY host'), addresses)
                 self.assertEqual(query('SELECT alias, balance, reputation, active_contract FROM game_saveslot'), [('Archive', 842, 130, '0-1')])
                 self.assertEqual(query('SELECT amount, description FROM game_ledgerentry'), [(-90, 'Archive test receipt')])
                 self.assertEqual(query('SELECT count(*) FROM game_generatedmission'), [(1,)])
@@ -2720,3 +2723,136 @@ class EraseAllCopiesTests(APIHelpers, TestCase):
             self.cmd(f'rm /{path}')
         self.clean_exit()
         self.assertIn('Delivery verified', self.cmd('submit')['mission_log'][-1]['text'])
+
+
+class FictionalAddressTests(APIHelpers, TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user('address-runner')
+        self.client.force_login(self.user)
+        self.slot = SaveSlot.objects.create(user=self.user, position=1, alias='Address')
+
+    def test_documentation_ranges_and_private_overflow_are_unique(self):
+        from .addresses import allocated_ip
+        from ipaddress import ip_address, ip_network
+        values = [allocated_ip(index) for index in range(1, 1001)]
+        self.assertEqual(len(set(values)), 1000)
+        ranges = [ip_network(value) for value in ['192.0.2.0/24', '198.51.100.0/24', '203.0.113.0/24', '10.0.0.0/8']]
+        self.assertTrue(all(any(ip_address(value) in network for network in ranges) for value in values))
+        self.assertEqual(allocated_ip(1), '192.0.2.1')
+        self.assertEqual(allocated_ip(762), '203.0.113.254')
+        self.assertEqual(allocated_ip(763), '10.0.0.1')
+
+    def test_named_directory_ping_and_ip_contract_workflow_share_one_server_identity(self):
+        self.launch('terminal')
+        data = self.refresh()
+        node = next(entry for entry in data['target_directory'] if entry['address'] == 'helix-0.internal')
+        self.assertEqual(node['name'], 'Helix Research Lab: Research Archive')
+        address = node['ip_address']
+        result = self.cmd(f'ping {address}')
+        self.assertIn('Reply from ' + address, result['mission_log'][-1]['text'])
+        self.assertEqual(result['balance'], 1200)
+        self.assertFalse(result['connected'])
+        self.assertFalse(result['trace_active'])
+        self.assertFalse(self.slot.server_states.exists())
+        resolved = self.cmd('resolve "Helix Research Lab: Research Archive"')
+        self.assertIn(address, resolved['mission_log'][-1]['text'])
+        self.reserve()
+        self.cmd(f'scan {address}')
+        data = self.cmd(f'connect {address}')
+        self.assertEqual(data['remote_ip'], address)
+        self.assertEqual(data['remote_name'], node['name'])
+        self.assertEqual(data['remote_target'], 'helix-0.internal')
+        self.cmd('crack 22')
+        self.cmd('get research.dat')
+        self.clean_exit()
+        self.assertIn('Delivery verified', self.cmd('submit')['mission_log'][-1]['text'])
+        self.assertEqual(self.slot.server_states.get(address='helix-0.internal').visits, 1)
+        self.client.logout()
+        self.client.force_login(self.user)
+        history = self.client.get(f'/api/{self.endpoint("history")}/', {'server': 'helix-0.internal'}).json()
+        self.assertEqual(history['servers'][0]['ip_address'], address)
+
+    def test_ping_filtered_hosts_can_still_be_scanned_and_connected(self):
+        from .models import DirectoryServer
+        node = DirectoryServer.objects.get(pk='world-0')
+        node.data['ping_response'] = False
+        node.save()
+        self.launch('terminal')
+        entry = next(entry for entry in self.refresh()['network_directory'] if entry['id'] == node.pk)
+        address = entry['ip_address']
+        self.assertIn('ICMP may be filtered', self.cmd(f'ping {address}')['mission_log'][-1]['text'])
+        self.assertIn('Scan complete', self.cmd(f'scan {address}')['mission_log'][-1]['text'])
+        self.assertTrue(self.cmd(f'connect {address}')['connected'])
+
+    def test_global_ip_mapping_does_not_authorize_another_saves_private_host(self):
+        from .addresses import ip_for
+        other = get_user_model().objects.create_user('other-address-runner')
+        save = SaveSlot.objects.create(user=other, position=1, alias='Private')
+        save.broker_jobs = {'private': {**CONTRACT_BY_ID['0-0'], 'id': 'private', 'target': 'private-mission.internal'}}
+        save.save()
+        address = ip_for('private-mission.internal')
+        self.launch('terminal')
+        for verb in ['ping', 'scan', 'connect']:
+            data = self.cmd(f'{verb} {address}')
+            self.assertIn('not present', data['mission_log'][-1]['text'])
+            self.assertFalse(data['connected'])
+        self.assertFalse(self.slot.server_states.exists())
+        self.assertIn('not present', self.cmd('ping 8.8.8.8')['mission_log'][-1]['text'])
+
+    def test_legacy_hostnames_and_saved_backdoors_still_resolve_to_the_same_ip(self):
+        from .addresses import ip_for
+        self.slot.installed_software.append('rootkit-epic')
+        self.slot.save()
+        self.gain_access()
+        self.cmd('install')
+        self.cmd('rm research.dat')
+        self.clean_exit()
+        address = ip_for('helix-0.internal')
+        data = self.post(self.endpoint('backdoors'), {'target': address})
+        self.assertEqual(data['remote_ip'], address)
+        self.assertTrue(data['stealth_session'])
+        server = self.slot.server_states.get(address='helix-0.internal')
+        self.assertFalse(server.files[0]['present'])
+        self.assertEqual(server.visits, 2)
+        self.assertEqual(len(data['backdoors']), 1)
+        self.assertEqual(data['backdoors'][0]['ip_address'], address)
+
+    def test_destinations_cannot_be_added_to_proxy_routes(self):
+        node = self.refresh()['target_directory'][0]
+        self.post(self.endpoint('directory'), {'action': 'add', 'server_id': node['id']}, 400)
+        self.post(self.endpoint('route'), {'nodes': [node['id']]}, 400)
+
+
+class ConcurrentAddressTests(TransactionTestCase):
+    def test_simultaneous_allocations_for_one_host_return_one_persistent_ip(self):
+        from .addresses import ip_for
+        from .models import NetworkAddress
+        def allocate(_):
+            close_old_connections()
+            try:
+                return ip_for('shared-address.internal')
+            finally:
+                close_old_connections()
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            values = list(pool.map(allocate, range(2)))
+        self.assertEqual(len(set(values)), 1)
+        self.assertEqual(NetworkAddress.objects.filter(host='shared-address.internal').count(), 1)
+        self.assertNotEqual(ip_for('another-address.internal'), values[0])
+
+
+    def test_opposite_order_batches_share_addresses_without_deadlocking(self):
+        from threading import Barrier
+        from .addresses import ip_for
+        gate = Barrier(2)
+        def allocate(hosts):
+            close_old_connections()
+            try:
+                gate.wait(timeout=5)
+                with transaction.atomic():
+                    return {host: ip_for(host) for host in hosts}
+            finally:
+                close_old_connections()
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first, second = list(pool.map(allocate, [('batch-a.internal', 'batch-b.internal'), ('batch-b.internal', 'batch-a.internal')]))
+        self.assertEqual(first, second)
+        self.assertEqual(len(set(first.values())), 2)

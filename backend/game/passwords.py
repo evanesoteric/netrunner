@@ -5,6 +5,7 @@ from uuid import uuid4
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from .catalog import SOFTWARE
+from .addresses import ip_for, target_name
 from .mechanics import GameError, hardware, transact, log, choose_tool
 from .persistence import current_target, record_action, sync_remote_logs
 
@@ -43,7 +44,7 @@ def start_break(slot, port=None, product_id=None):
                                   started_at=started.isoformat(), finishes_at=(started + timedelta(seconds=seconds)).isoformat(),
                                   duration=seconds)
     state.pop('password_result', None)
-    log(slot, 'terminal', f'Password breaker started on {target["target"]}:{target["port"]}. Estimated duration: {seconds}s.')
+    log(slot, 'terminal', f'Password breaker started on {ip_for(target["target"])}:{target["port"]}. Estimated duration: {seconds}s.')
 
 
 def settle_break(slot):
@@ -87,4 +88,4 @@ def login_target(slot):
     state.pop('password_ready', None)
     record_action(slot, target, 'access_granted', 'Administrator login accepted; filesystem mounted.')
     sync_remote_logs(slot)
-    log(slot, 'terminal', f'Logged in as admin on {target["target"]}. Remote filesystem mounted. Trace started.')
+    log(slot, 'terminal', f'Logged in as admin on {ip_for(target["target"])} ({target_name(target)}). Remote filesystem mounted. Trace started.')

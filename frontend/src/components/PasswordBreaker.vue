@@ -27,7 +27,7 @@ onBeforeUnmount(() => clearInterval(timer))
   <section class="panel password-breaker" aria-label="Lockpick password breaker">
     <div class="panel-title"><span><KeyRound :size="16" /> {{ tool?.name || 'LOCKPICK' }}</span><span class="panel-meta">{{ slot.login_service?.name || 'SERVER LOGIN' }}</span></div>
     <form class="decoder-display" :class="{ working: attempt }" @submit.prevent="run('login')">
-      <div class="decoder-meta"><span>{{ slot.connected ? `${slot.remote_target}${port ? ':' + port : ''}` : 'NO REMOTE CONNECTION' }}</span><span>CLASS {{ product?.power }} / {{ tool?.ram }} GB</span></div>
+      <div class="decoder-meta"><span>{{ slot.connected ? `${slot.remote_ip || slot.remote_target}${port ? ':' + port : ''}` : 'NO REMOTE CONNECTION' }}</span><span>CLASS {{ product?.power }} / {{ tool?.ram }} GB</span></div>
       <label :for="`${id}-license`">LOCKPICK LICENSE</label><select :id="`${id}-license`" v-model="selected" aria-label="Lockpick license" :disabled="busy || !!attempt || ready"><option v-for="license in licenses" :key="license.id" :value="license.id">{{ license.name }}</option></select>
       <label :for="`${id}-login`">LOGIN</label><input :id="`${id}-login`" class="login-user" aria-label="Login username" value="admin" readonly autocomplete="off" />
       <label :for="`${id}-password`">PASSWORD</label><input :id="`${id}-password`" class="decoder-password" aria-label="Password" :value="password" placeholder="Awaiting password breaker" readonly autocomplete="off" spellcheck="false" />

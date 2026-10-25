@@ -241,3 +241,10 @@ bash scripts/generate-content.sh missions --count 1 --rank 0 --service wordpress
 ```
 
 The option selects a deletion mission if `--objective` is omitted. It cannot be combined with retrieval, encryption, or directory-server generation. Every required file path must be distinct and cannot conflict with a directory. The generator creates the actual required copies and puts their exact paths in the broker brief. It does not make every other backup on that server an objective. Requirements, file states and per-path receipts persist in PostgreSQL and normal backups.
+
+
+### Persistent fictional addresses
+
+Migration 0015 creates `NetworkAddress`, mapping each canonical virtual host to a unique fictional IPv4 address. Addresses are assigned on first lookup and retained in normal PostgreSQL backups. Allocation uses the documentation ranges before falling back to private 10/8; concurrent lookups for one host return the same committed mapping. Requests preload existing mappings to avoid an individual lookup for every directory row.
+
+Keep existing `target`/`address` host keys when authoring or importing saved content. They preserve filesystem state, routes, contract evidence and old command aliases. The API adds `ip_address`, `target_name`, `remote_ip`, `remote_name` and `target_directory` for display. Generated missions include organization and specific server labels; the web client presents these names and the assigned IP rather than requiring legacy `.internal` aliases. Address resolution does not bypass directory visibility, rank checks or ownership of a private mission.

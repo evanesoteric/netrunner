@@ -1,6 +1,7 @@
 """Persisted public contract numbers; catalog template keys are private."""
 from .models import ContractIdentity
 from .services import service_name
+from .addresses import ip_for, target_name
 
 
 def codes(slot=None):
@@ -12,7 +13,9 @@ def public_job(job, mapping=None):
     if job is None:
         return None
     mapping = codes() if mapping is None else mapping
-    return {**{key: value for key, value in job.items() if key != 'artifact_path'}, 'service_name': service_name(job), 'id': str(mapping[job['id']])}
+    display = target_name(job)
+    description = job['description'].replace(job['target'], display)
+    return {**{key: value for key, value in job.items() if key != 'artifact_path'}, 'description': description, 'target_name': display, 'ip_address': ip_for(job['target']), 'service_name': service_name(job), 'id': str(mapping[job['id']])}
 
 
 def public_code(key, slot=None):

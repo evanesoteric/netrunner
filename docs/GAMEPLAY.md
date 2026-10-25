@@ -222,3 +222,30 @@ Three authored contracts require deleting the main file and specific backup copi
 Use the normal scan and login workflow, delete each named file with `rm`, clean the remote logs, disconnect and `submit`. The active broker card and terminal `brief` track each receipt. Copy order does not matter, and receipts survive clean disconnects. You can return for remaining files; removing only the primary file does not qualify for payment. All copies must still be deleted when the broker verifies submission. If administrator maintenance restores them, old receipts do not qualify for the restored files.
 
 Only the listed paths are required. Ordinary single-file deletion jobs still require just their objective file; unrelated logs, backups and reference copies need not be removed. Replacement assignments retain the multiple-copy requirement but use fresh hosts, filenames and paths.
+
+
+## Named systems and IP-address workflow
+
+Contracts identify a named organization and a specific system, such as **Helix Research Lab: Research Archive**. Open **Atlas network → Network directory**, search for that organization, and read the system's IPv4 address. Contract destinations are marked **DESTINATION ONLY**; they cannot be added as proxy hops. Public proxy servers remain separate directory entries that you can save and chain on the map.
+
+Reserve the contract, build your route, then use the IP shown in Atlas. The following address is illustrative; your world's assigned address may differ:
+
+```text
+ping 203.0.113.42
+scan 203.0.113.42
+connect 203.0.113.42
+login
+```
+
+`ping` simulates reachability, displays the server name and IP, and opens no session, starts no trace and charges no CPH. It is optional: an ICMP timeout can mean filtering, so scanning and connecting remain available. A successful login or matching exploit starts the trace as before. The connected prompt uses `admin@<IP>`, and the decoder and trace bar show the IP with the named system.
+
+To look up an exact known server name without probing:
+
+```text
+resolve "Helix Research Lab: Research Archive"
+ping "Helix Research Lab: Research Archive"
+```
+
+A broad organization name can be ambiguous; Atlas lists each specific system. Tab completes known IPs and legacy aliases. Legacy commands such as `scan helix-0.internal` still work, including the older walkthrough examples above. Internally, saved files, backdoors, proxy IDs and histories retain their existing identities; changing the displayed address does not recreate the server.
+
+Addresses persist in PostgreSQL across sessions, restarts and backups. The allocator uses `192.0.2.0/24`, `198.51.100.0/24`, and `203.0.113.0/24` documentation ranges, then private `10.0.0.0/8` for larger worlds. All replies and lookups are simulated locally by the game. No real DNS, ICMP, SSH or HTTP connection is made.

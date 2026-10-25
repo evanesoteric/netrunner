@@ -60,7 +60,7 @@ Stop with **Ctrl+C**, then `docker compose down`. Start again with `docker compo
 ## Core features
 
 - **Manual hacking:** tackle SSH, WordPress, PHP, RDP, SIP and other services using Lockpick or optional fingerprint exploits; retrieve or delete files, clean logs, and submit proof for payment.
-- **Proxy routing:** discover dozens of public-access proxies and chain named servers on Atlas to buy trace time, balancing connection costs and latency.
+- **Proxy routing:** look up named organizations and persistent fictional IP addresses in Atlas, then chain public-access proxies to buy trace time.
 - **Custom rigs:** choose hardware and individual software licenses; manage working RAM, local storage, and applet capabilities.
 - **Contracts and rank:** rise from Ghost to Architect. Jobs are available at your rank, one above, and one below. Some deletion jobs require erasing named backup copies too. Failed contracts carry financial and reputation penalties.
 - **IRC Underground:** join a busy simulated Linux-style channel and trade CPH for lifetime or single-use fingerprint exploits.
@@ -86,7 +86,7 @@ Stop with **Ctrl+C**, then `docker compose down`. Start again with `docker compo
 | Save slots | Create, select, or restart one of three independent runners. |
 | Null Exchange / Backdoored Servers | Access hidden software and installed backdoor connections once unlocked. |
 
-The terminal is available from the top bar, with Tab completion and integrated `scan <host>` support. `login` opens the **Lockpick** decoder modal. Hacking software runs inside the primary terminal; Atlas keeps its map view. **Logcleaner** clears remote logs directly from the terminal. **Cartograph**, **Rosetta**, and **Tripwire** provide scanning, decryption, and trace monitoring.
+The terminal is available from the top bar, with Tab completion and integrated `ping <IP>` and `scan <IP>` commands. Find a contract's named system in Atlas, then use its address to scan and connect. `login` opens the **Lockpick** decoder modal. Hacking software runs inside the primary terminal; Atlas keeps its map view. **Logcleaner** clears remote logs directly from the terminal. **Cartograph**, **Rosetta**, and **Tripwire** provide scanning, decryption, and trace monitoring.
 
 ## More information
 

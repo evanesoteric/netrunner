@@ -124,3 +124,8 @@ class ServerEvent(models.Model):
 
     class Meta:
         ordering = ['-id']
+
+
+class NetworkAddress(models.Model):
+    host = models.CharField(max_length=100, unique=True)
+    ip = models.GenericIPAddressField(unique=True, null=True, editable=False)

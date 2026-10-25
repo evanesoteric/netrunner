@@ -2,6 +2,10 @@
 
 Historical feature and migration notes. See the [README](../README.md) for the current project overview and [development guide](DEVELOPMENT.md) for setup and maintenance.
 
+## v0.19 — named systems, Atlas addresses and simulated ping
+
+Contracts now identify organizations and specific server roles. Atlas lists their destinations separately from proxy servers and displays persistent fictional IPv4 addresses. Added terminal `ping` and `resolve`; IPs and exact server names can be used with scan/connect, backdoor jumps and deployment. Pinging is optional, free and opens no remote session; filtered ICMP does not prevent scanning or login. Connection prompts, decoder, trace bar, routing labels and histories use IPs and human-readable names. Legacy hostname aliases, existing server identities, saved routes and evidence remain intact. Migration 0015 adds the persistent address registry; PostgreSQL backups preserve it. Allocation uses documentation ranges first and private 10/8 for larger worlds. No command performs real DNS lookup or sends network probes.
+
 ## v0.18 — erase all copies contracts
 
 Added three authored deletion jobs: Ashfall audit (SSH), Juniper CMS (WordPress), and Glasshouse ledger (RDP). These briefs name two or three exact files, including backups. The active broker card and terminal brief track per-path receipts; payment requires all named files deleted and a clean exit. Partial deletion, unrelated files and restored copies do not qualify. Ordinary single-file jobs retain their existing rules. Fresh broker replacements preserve the multi-copy requirement while changing host and filenames. The offline generator now accepts repeatable `--delete-copy` paths; examples are in the development guide. Existing save data needs no schema migration; startup hooks allocate public IDs for the new templates.

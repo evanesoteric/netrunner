@@ -79,7 +79,7 @@ class Command(BaseCommand):
                 filename = options['filename'] or (f'{token[:6]}.enc' if encrypted else 'users.db' if service['service'] == 'wordpress' else f'{token[:6]}.dat')
                 description = f'{"Recover" if objective == "retrieve" else "Remove"} {filename} from {address}. Leave no access logs and submit proof through the broker.'
                 data = dict(id=key, target=address, title=f'{name} // {token[:6].upper()}', client='Independent broker',
-                            rank=rank, security=rank + 1, objective=objective, file=filename, encrypted=encrypted,
+                            rank=rank, security=rank + 1, organization=name, server_name=f'Private Records Server {token[:8].upper()}', objective=objective, file=filename, encrypted=encrypted,
                             **service, size=24 + rank * 32, reward=220 + rank * 200 + rng.randrange(0, 100, 10),
                             reputation=35 + rank * 10, description=description, x=x, y=y)
                 nested = options['placement'] == 'nested' or (options['placement'] == 'mixed' and rng.random() < .3)

@@ -66,6 +66,8 @@ def settle_broker(slot):
             job['artifact_path'] = job['delete_paths'][0]
             job['file'] = PurePosixPath(job['artifact_path']).name
             job['title'] = f'{job["title"].split(" // ")[0]} // erase all copies'
+        job['organization'] = f'{["Lumen","Redwood","Silverline","Arcadia"][int(nonce[0],16)%4]} Research Group'
+        job['server_name'] = f'Private Records Server {nonce[:8].upper()}'
         job['description'] = f'{"Recover" if job["objective"] == "retrieve" else "Delete"} {job["file"]} from {job["target"]}. Leave no remote access logs and deliver proof through the broker.' + (' The archive is encrypted.' if job['encrypted'] else '')
         if job.get('delete_paths'):
             job['description'] = deletion_description(job)

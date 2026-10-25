@@ -7,10 +7,13 @@ from .world_seed import MARKET_ADDRESS
 from .mechanics import GameError, transact, log, validate_route, route_stats, hardware
 from .persistence import ensure_server, effective_target, event, record_visit, record_action, record_proxy_route, schedule
 
+from .addresses import resolve_host, ip_for, target_name
+
 RANSOM_SECONDS = 120
 
 
 def find_target(slot, address):
+    address = resolve_host(slot, address)
     job = get_contract(slot.active_contract, slot)
     if job:
         if address != job['target']:
@@ -28,6 +31,8 @@ def find_target(slot, address):
 
 
 def connect_target(slot, address, backdoor=False):
+    supplied = address
+    address = resolve_host(slot, address)
     if slot.mission_started:
         raise GameError('Disconnect before opening another remote session.')
     if address == MARKET_ADDRESS and not backdoor:
@@ -54,7 +59,7 @@ def connect_target(slot, address, backdoor=False):
         slot.remote_host = {**target, '_backdoor': True}
         slot.mission_state = {**(slot.mission_state if job else {}), 'access': True, 'scanned': True, 'dirty': False, 'work': 0, 'cwd': '/', 'known_paths': []}
         slot.mission_started = timezone.now()
-        return f'Backdoor link established: {address}. Direct access / no proxy lease / remote logging suppressed.'
+        return f'Backdoor link established: {ip_for(address)} ({target_name(target)}). Direct access / no proxy lease / remote logging suppressed.'
     target = find_target(slot, address)
     server = ensure_server(slot, target)
     target = effective_target(slot, target)
@@ -76,7 +81,7 @@ def connect_target(slot, address, backdoor=False):
     state.pop('password_break', None)
     state.pop('password_result', None)
     state.pop('password_ready', None)
-    return f'Dialing {address} via {stats["hops"]} proxies.\nLease paid: {stats["fee"]} CPH. Remote session established. Server login awaiting authentication.'
+    return f'Dialing {supplied} via {stats["hops"]} proxies.\n{target_name(target)} [{ip_for(address)}]\nLease paid: {stats["fee"]} CPH. Remote session established. Server login awaiting authentication.'
 
 
 def install_rootkit(slot):
@@ -96,6 +101,7 @@ def install_rootkit(slot):
 
 
 def deploy_ransomware(slot, address):
+    address = resolve_host(slot, address)
     target = effective_target(slot, session_target(slot))
     if not slot.mission_started or not target or target['target'] != address or not slot.mission_state.get('access'):
         raise GameError('Connect to the specified server and mount its filesystem first.')

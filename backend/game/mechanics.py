@@ -19,6 +19,7 @@ from .persistence import (current_target, effective_target, ensure_server, event
 
 
 from .filesystem import FilesystemError, resolve_file
+from .addresses import ip_for, target_name, resolve_host
 
 
 class GameError(Exception):
@@ -282,7 +283,7 @@ def trade(slot, action, product_id):
 MANUALS = {
     'filesystem': 'VIRTUAL REMOTE FILESYSTEM\nls [path] — list a directory (2s trace work)\ncd [path] — change directory (1s); cd alone returns to /\npwd — current directory\ncat <path> — preview text (1s)\nfind <filename-or-glob> — search the current subtree (8s)\nget <path> — download any file; only the exact objective path produces proof\nrm <path> — delete one file; directories cannot be deleted\nUse absolute /paths or relative paths, including .. . Local ls, rm and decrypt work while disconnected. Browsing adds work to the running trace; logs still need cleanup.',
     'exploit': 'FINGERPRINT EXPLOITS\nBuy licenses or single-use copies in IRC Underground with CPH.\nexploits — list owned fingerprint tools\nexploit <id> — use on the connected, freshly scanned server\nMatch protocol, auth version and patch revision exactly. Uses 2 GB transient RAM.\nA lifetime license is reusable for that fingerprint; single-use copies burn on successful entry only.\nSuccess opens an admin shell immediately, starts a trace and leaves access logs. Clean logs before disconnecting.',
-    'terminal': 'LOCAL SHELL\nexploits — list owned fingerprint exploits\nexploit <id> — instant shell using a matching exploit from IRC Underground\napplets — list owned terminal software\nuse <license-id> — select an applet version\ntrace — licensed Tripwire telemetry\ninstall — install owned Wraith rootkit\ndeploy <host> — deploy owned Eclipse ransomware\nhelp — application manual\nrumors — intercepted hidden-service invitation\njump <host> — use an installed Wraith backdoor\napps — running processes and RAM\ncontracts — broker listings\naccept <contract-id> — reserve by the numeric ID in contracts (0–255)\nbrief — read the accepted brief\nroute — inspect the committed proxy chain\nconnect <host> — dial a fictional target\nscan <host> — scan with owned Cartograph software\nlogcleaner [license-id] — erase remote logs with an owned Logcleaner license\nlockpick — open the server login dialog\nstatus — gateway status\nhistory — recent operator journal for this target\ndecrypt <local-file> — decrypt a local archive with owned Rosetta software while disconnected\nls [path] — list local files or a remote directory\ncd [path] — change remote directory\npwd — print remote working directory\ncat <path> — preview a remote text file\nfind <filename> — search under the current remote directory (8s trace work)\nget <file> — copy a readable file to local storage\nrm <file> — remove a local file when disconnected; a remote file when logged in\ndisconnect — end the remote session\nsubmit — deliver evidence to the broker\nabort — abandon the contract (fine and reputation loss)\nclear — clear local console output',
+    'terminal': 'LOCAL SHELL\nexploits — list owned fingerprint exploits\nexploit <id> — instant shell using a matching exploit from IRC Underground\napplets — list owned terminal software\nuse <license-id> — select an applet version\ntrace — licensed Tripwire telemetry\ninstall — install owned Wraith rootkit\ndeploy <host> — deploy owned Eclipse ransomware\nhelp — application manual\nrumors — intercepted hidden-service invitation\njump <host> — use an installed Wraith backdoor\napps — running processes and RAM\ncontracts — broker listings\naccept <contract-id> — reserve by the numeric ID in contracts (0–255)\nbrief — read the accepted brief\nroute — inspect the committed proxy chain\nping <IP-or-name> — resolve and check simulated connectivity\nresolve <name> — look up a known server address\nconnect <IP-or-name> — dial a fictional target\nscan <host> — scan with owned Cartograph software\nlogcleaner [license-id] — erase remote logs with an owned Logcleaner license\nlockpick — open the server login dialog\nstatus — gateway status\nhistory — recent operator journal for this target\ndecrypt <local-file> — decrypt a local archive with owned Rosetta software while disconnected\nls [path] — list local files or a remote directory\ncd [path] — change remote directory\npwd — print remote working directory\ncat <path> — preview a remote text file\nfind <filename> — search under the current remote directory (8s trace work)\nget <file> — copy a readable file to local storage\nrm <file> — remove a local file when disconnected; a remote file when logged in\ndisconnect — end the remote session\nsubmit — deliver evidence to the broker\nabort — abandon the contract (fine and reputation loss)\nclear — clear local console output',
     'mapper': 'CARTOGRAPH\nscan <host> — inspect a fictional host and its services\nCosts 1 + tool tier CPH. Scan quality depends on tool capability.',
     'cracker': 'LOCKPICK\nUse login in the primary terminal to open the password decoder. Connect to a server login and scan its authentication service first.',
     'decryptor': 'ROSETTA\ndecrypt <file> — decode an encrypted remote archive\nRequires file access and a sufficient decryption engine.',
@@ -318,7 +319,7 @@ def reserve(slot, contract_id):
     slot.remote_host = {}
     slot.mission_state = {}
     slot.mission_started = None
-    return f'Reservation confirmed: {public_code(job["id"], slot)}.\n{job["description"]}\nTarget: {job["target"]}. Payment: {job["reward"]} CPH.'
+    return f'Reservation confirmed: {public_code(job["id"], slot)}.\n{job["description"].replace(job["target"], target_name(job))}\nTarget: {target_name(job)} (address in Atlas). Payment: {job["reward"]} CPH.'
 
 
 def _tool_work(slot, app, base, tool=None):
@@ -344,7 +345,7 @@ def execute(slot, app, raw):
         return
     verb, args = parts[0].lower(), parts[1:]
     remote = session_target(slot) if app == 'terminal' and slot.mission_started and slot.mission_state.get('access') else None
-    prompt = f'admin@{remote["target"]}' if remote else f'{slot.alias}@{app}'
+    prompt = f'admin@{ip_for(remote["target"])}' if remote else f'{slot.alias}@{app}'
     log(slot, app, f'{prompt}:{slot.mission_state.get("cwd", "/") if remote else "~"}$ {raw}')
     if verb == 'clear' and app == 'terminal':
         slot.mission_log = [entry for entry in slot.mission_log if entry.get('app') != app]
@@ -389,6 +390,7 @@ def require_login(slot):
 
 def scan_target(slot, address):
     from .operations import find_target
+    address = resolve_host(slot, address)
     target = current_target(slot) if slot.mission_started else effective_target(slot, find_target(slot, address))
     if not target or address != target['target']:
         raise GameError('Host not present in your reserved network directory.')
@@ -409,7 +411,7 @@ def scan_target(slot, address):
     event(server, 'scanned', f'Service fingerprint observed: port {target["port"]}, revision {server.revision}.')
     server.save()
     state.update(scanned_revision=server.revision, scanned=True, scanned_host=target['target'])
-    return f'Host: {target["target"]}\n{target["port"]}/{transport}  OPEN  auth-v{target["security"]} / patch r{target.get("server_revision", 1)}\nArchive: {PurePosixPath(target["file"]).name if target.get("file_present", True) else "missing"} / {target["size"]} MB / {"encrypted" if target["encrypted"] else "plaintext"}\nFingerprint: {service}\nAccess: Lockpick admin login / matching exploit optional.\nOther ports: filtered. Scan complete.'
+    return f'Host: {ip_for(target["target"])} / {target_name(target)}\nAlias: {target["target"]}\n{target["port"]}/{transport}  OPEN  auth-v{target["security"]} / patch r{target.get("server_revision", 1)}\nArchive: {PurePosixPath(target["file"]).name if target.get("file_present", True) else "missing"} / {target["size"]} MB / {"encrypted" if target["encrypted"] else "plaintext"}\nFingerprint: {service}\nAccess: Lockpick admin login / matching exploit optional.\nOther ports: filtered. Scan complete.'
 
 
 def clean_logs(slot, license_id=None):
@@ -459,6 +461,13 @@ def decrypt_local(slot, name):
 
 
 def _shell(slot, verb, args, job):
+    if verb in ('ping', 'resolve'):
+        if not args:
+            raise GameError(f'Use {verb} <IP-or-server-name>.')
+        from .addresses import ping_target
+        return ping_target(slot, ' '.join(args), resolve_only=verb == 'resolve')
+    if verb in ('connect', 'jump') and len(args) > 1:
+        args = [' '.join(args)]
     if verb == 'exploits' and not args:
         from .exploits import inventory
         return '\n'.join(f'{item["id"]}: {item["fingerprint"]} / {"lifetime" if item["mode"] == "license" else str(item["quantity"]) + " copies"}' for item in inventory(slot)) or 'No exploits owned. Visit IRC Underground.'
@@ -539,9 +548,9 @@ def _shell(slot, verb, args, job):
     if verb == 'accept' and len(args) == 1:
         return reserve(slot, args[0])
     if verb == 'route' and not args:
-        return 'GATEWAY → ' + ' → '.join([get_server(key)['name'] + ' [' + get_server(key)['address'] + ']' for key in slot.proxy_route] + ['TARGET']) + f'\nConnection lease: {route_stats(slot)["fee"]} CPH'
+        return 'GATEWAY → ' + ' → '.join([get_server(key)['name'] + ' [' + ip_for(get_server(key)['address']) + ']' for key in slot.proxy_route] + ['TARGET']) + f'\nConnection lease: {route_stats(slot)["fee"]} CPH'
     if verb == 'status' and not args:
-        return f'Balance: {slot.balance} CPH\nRAM: {ram_used(slot)}/{hardware(slot)["memory"]["ram"]} GB\nRemote: {job["target"] if job and slot.mission_started else "disconnected"}\nLocal archive: {len(slot.local_files)} files / {storage_used(slot)} MB'
+        return f'Balance: {slot.balance} CPH\nRAM: {ram_used(slot)}/{hardware(slot)["memory"]["ram"]} GB\nRemote: {ip_for(job["target"]) if job and slot.mission_started else "disconnected"}\nLocal archive: {len(slot.local_files)} files / {storage_used(slot)} MB'
     if verb in ('ls', 'rm') and not slot.mission_started:
         return local_filesystem(slot, verb, args)
     if verb in ('ls', 'get', 'rm'):
@@ -551,7 +560,7 @@ def _shell(slot, verb, args, job):
     if verb == 'brief' and not args:
         if not slot.active_contract:
             raise GameError('No reserved contract.')
-        result = f'{public_code(job["id"], slot)} // {job["description"]}\nTarget: {job["target"]}. Reward: {job["reward"]} CPH.'
+        result = f'{public_code(job["id"], slot)} // {job["description"].replace(job["target"], target_name(job))}\nTarget: {target_name(job)}. Look up its address in Atlas. Reward: {job["reward"]} CPH.'
         if job.get('delete_paths'):
             from .deletion import required_paths, missing_deletions
             server = slot.server_states.filter(address=job['target']).first()

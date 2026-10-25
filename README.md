@@ -65,6 +65,7 @@ Stop with **Ctrl+C**, then `docker compose down`. Start again with `docker compo
 - **Contracts and rank:** rise from Ghost to Architect. Jobs are available at your rank, one above, and one below. Failed contracts carry financial and reputation penalties.
 - **IRC Underground:** join a busy simulated Linux-style channel and trade CPH for lifetime or single-use fingerprint exploits.
 - **Cipher economy:** earn and spend fictional cryptocurrency (CPH), manage a bank account, and trade equipment.
+- **Server exploration:** browse service-specific folders, inspect files, and locate contract evidence among backups and other records.
 - **Persistent worlds:** each save has its own local files, server state, visit history, notes, and saved workspace arrangement.
 - **Hidden discoveries:** uncover the Null Exchange, epic software, backdoors, and ransomware opportunities.
 

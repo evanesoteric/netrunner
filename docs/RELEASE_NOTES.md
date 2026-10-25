@@ -2,6 +2,12 @@
 
 Historical feature and migration notes. See the [README](../README.md) for the current project overview and [development guide](DEVELOPMENT.md) for setup and maintenance.
 
+## v0.17 — populated remote filesystems
+
+Every server now has a persistent virtual directory tree with service-specific application files, logs, configuration, notes, backups and reference copies. Added `ls [path]`, `cd`, `pwd`, `cat` and `find`, plus discovered-path Tab completion and working-directory prompts. Some contract artifacts remain at root; others live in folders such as `/var/www`, `/Users/admin/Documents` or database data directories. Scans no longer reveal nested artifact locations. Any file can be copied or deleted, but only the exact objective path produces broker proof; same-named reference files do not count. File previews and downloads never touch the host filesystem. Directory browsing adds bounded trace work without new CPH fees.
+
+The offline generator supports `--placement root|nested|mixed`, `--artifact-dir` and `--filename`; WordPress missions can use `users.db`. Migration 0014 adds background files to existing servers while preserving their objective paths, encrypted/deleted states and histories. Maintenance restores background data and relocates the objective into its revision archive. Local downloads, storage cleanup and decryption remain available after disconnecting.
+
 ## v0.16 — diverse services without mandatory exploit costs
 
 Expanded to eleven service families: SSH, HTTP, RDP, WordPress CMS, PHP 5, VOIP/SIP, Telnet, FTP, SMTP, MySQL and Redis. Added 45 built-in contracts, service labels in briefs and the directory, UDP-aware SIP scan output, and service variation in replacement assignments. Every new Ghost service contract is playable with starter software through Lockpick; paid exploits remain optional and retain existing pricing rules. IRC now offers permanent and single-use exploits for every family, matching application release as well as auth class and patch revision. Generic HTTP packets cannot unlock WordPress or PHP targets. Existing discovered server identities and legacy exploit licenses remain valid. The offline generator accepts `--service` for both contracts and directory servers. No schema migration is required; startup migration hooks allocate IDs for the additional templates.

@@ -831,7 +831,7 @@ class GeneratedWorldTests(APIHelpers, TestCase):
             if job['encrypted']:
                 self.cmd('abort')
             else:
-                self.cmd(f'{"get" if job["objective"] == "retrieve" else "rm"} {job["file"]}')
+                self.cmd(f'{"get" if job["objective"] == "retrieve" else "rm"} /{job.get("artifact_path", job["file"])}')
                 self.clean_exit()
                 result = self.cmd('submit')
                 self.assertIn('Delivery verified', self.log_text(result))
@@ -1087,7 +1087,8 @@ class PersistentWorldTests(APIHelpers, TestCase):
         self.client.force_login(self.user)
         self.mount()
         result = self.cmd('ls')
-        self.assertIn('Directory empty', result['mission_log'][-1]['text'])
+        self.assertNotIn('public-index.dat', result['mission_log'][-1]['text'])
+        self.assertIn('backup/', result['mission_log'][-1]['text'])
         self.assertIn('File not found', self.cmd('get public-index.dat')['mission_log'][-1]['text'])
         history = self.history()
         self.assertIn('file_deleted', {entry['kind'] for entry in history['events']})
@@ -1161,7 +1162,7 @@ class PersistentWorldTests(APIHelpers, TestCase):
             connected = self.post(self.endpoint('backdoors'), {'target': server.address})
             self.assertEqual(connected['balance'], before)
             self.assertTrue(connected['stealth_session'])
-            self.assertIn('archive/r2/public-index.dat', self.cmd('ls')['mission_log'][-1]['text'])
+            self.assertIn('public-index.dat', self.cmd('ls /archive/r2')['mission_log'][-1]['text'])
             server.refresh_from_db()
             self.assertTrue(server.backdoor_installed)
             self.assertEqual(server.remote_logs, [])
@@ -1867,7 +1868,9 @@ class FreshBrokerTests(APIHelpers, TestCase):
         self.cmd(f'scan {new["target"]}')
         self.cmd(f'connect {new["target"]}')
         self.cmd(f'crack {new["port"]}')
-        self.cmd(f'get {new["file"]}')
+        matches = self.cmd(f'find {new["file"]}')['mission_log'][-1]['text'].splitlines()
+        found = next(path for path in matches if not path.startswith('/backup/reference/'))
+        self.cmd(f'get {found}')
         self.clean_exit()
         self.assertIn('Delivery verified',self.cmd('submit')['mission_log'][-1]['text'])
         other=SaveSlot.objects.create(user=self.slot.user,position=2,alias='Other')
@@ -2230,7 +2233,7 @@ class ExpandedServiceTests(APIHelpers, TestCase):
                 self.cmd(f'connect {job["target"]}')
                 data = self.cmd(f'crack {job["port"]}')
                 self.assertTrue(data['authenticated'])
-                self.cmd(f'{"get" if job["objective"] == "retrieve" else "rm"} {job["file"]}')
+                self.cmd(f'{"get" if job["objective"] == "retrieve" else "rm"} /{job.get("artifact_path", job["file"])}')
                 self.clean_exit()
                 data = self.cmd('submit')
                 self.assertIn('Delivery verified', data['mission_log'][-1]['text'])
@@ -2363,3 +2366,199 @@ class ExpandedServiceTests(APIHelpers, TestCase):
         self.cmd('connect atlantic-port.internal')
         data = self.cmd('scan atlantic-port.internal')
         self.assertIn('Fingerprint: HTTP / auth-v1 / patch r1', data['mission_log'][-1]['text'])
+
+
+class RemoteFilesystemTests(APIHelpers, TestCase):
+    def setUp(self):
+        user = get_user_model().objects.create_user('file-runner')
+        self.client.force_login(user)
+        self.slot = SaveSlot.objects.create(user=user, position=1, alias='Files')
+
+    def test_every_service_gets_a_deterministic_bounded_background_tree(self):
+        from .filesystem import build_tree
+        from .services import SERVICES, service_fields
+        for key in SERVICES:
+            target = dict(target=f'{key}.internal', file='payload.dat', size=24, encrypted=False, security=1, **service_fields(key))
+            files = build_tree(target)
+            self.assertEqual(files, build_tree(target))
+            self.assertTrue(files[0]['artifact'])
+            self.assertGreaterEqual(sum(item.get('type') == 'file' for item in files), 16)
+            self.assertGreaterEqual(sum(item.get('type') == 'directory' for item in files), 7)
+            self.assertLess(len(files), 80)
+            self.assertEqual(len({item['name'] for item in files}), len(files))
+
+    def test_navigation_scopes_listings_and_does_not_disclose_hidden_paths_before_login(self):
+        self.reserve('0-3')
+        data = self.cmd('scan helix-3.internal')
+        self.assertNotIn('var/www/cms-backup.dat', data['mission_log'][-1]['text'])
+        self.assertNotIn('artifact_path', data['active_contract'])
+        server = self.slot.server_states.get(address='helix-3.internal')
+        self.assertEqual(server.observed['files'], [])
+        self.cmd('connect helix-3.internal')
+        self.cmd('crack 443')
+        root = self.cmd('ls')
+        self.assertIn('var/', root['mission_log'][-1]['text'])
+        self.assertNotIn('cms-backup.dat', root['mission_log'][-1]['text'])
+        self.assertNotIn('/var/www/cms-backup.dat', [item['path'] for item in root['remote_entries']])
+        self.cmd('cd /var/www')
+        self.assertEqual(self.cmd('pwd')['mission_log'][-1]['text'], '/var/www')
+        data = self.cmd('ls')
+        self.assertIn('cms-backup.dat', data['mission_log'][-1]['text'])
+        self.assertIn('wp-content/', data['mission_log'][-1]['text'])
+        self.assertIn('/var/www/cms-backup.dat', [item['path'] for item in data['remote_entries']])
+        self.assertIn('WordPress front controller', self.cmd('cat ./index.php')['mission_log'][-1]['text'])
+        self.assertEqual(self.cmd('cd ..')['remote_cwd'], '/var')
+        self.assertEqual(self.cmd('cd ../../../../../')['remote_cwd'], '/')
+        self.assertIn('Directory not found', self.cmd('cd /missing')['mission_log'][-1]['text'])
+        self.assertEqual(self.refresh()['remote_cwd'], '/')
+
+    def test_same_named_reference_copy_never_fulfils_retrieval_and_real_evidence_is_retained(self):
+        self.gain_access('0-0')
+        data = self.cmd('get /backup/reference/research.dat')
+        self.assertEqual(data['local_files'][0]['name'], 'research.dat')
+        self.assertNotIn('local_file_id', SaveSlot.objects.get(pk=self.slot.pk).mission_state)
+        self.clean_exit()
+        self.assertIn('Broker rejected', self.cmd('submit')['mission_log'][-1]['text'])
+        self.cmd('connect helix-0.internal')
+        self.cmd('crack 22')
+        data = self.cmd('get /research.dat')
+        real = next(entry for entry in data['local_files'] if entry['source_path'] == 'research.dat')
+        self.assertEqual(real['name'], 'research_2.dat')
+        self.cmd('get /backup/reference/research.dat')
+        self.assertEqual(SaveSlot.objects.get(pk=self.slot.pk).mission_state['local_file_id'], real['id'])
+        self.clean_exit()
+        self.assertIn('Delivery verified', self.cmd('submit')['mission_log'][-1]['text'])
+
+    def test_deleting_decoy_does_not_complete_contract_and_background_changes_persist(self):
+        self.gain_access('0-2')
+        self.cmd('rm /backup/reference/audit.log')
+        self.cmd('rm /home/admin/todo.txt')
+        self.clean_exit()
+        self.assertIn('Broker rejected', self.cmd('submit')['mission_log'][-1]['text'])
+        self.cmd('connect helix-2.internal')
+        self.cmd('crack 22')
+        self.assertIn('File not found', self.cmd('cat /home/admin/todo.txt')['mission_log'][-1]['text'])
+        self.cmd('rm /audit.log')
+        self.assertIn('README.txt', self.cmd('ls')['mission_log'][-1]['text'])
+        self.clean_exit()
+        self.assertIn('Delivery verified', self.cmd('submit')['mission_log'][-1]['text'])
+
+    def test_browse_and_search_cost_trace_work_without_adding_cash_charges(self):
+        self.gain_access('0-0')
+        self.slot.refresh_from_db()
+        balance = self.slot.balance
+        before = self.slot.mission_state['work']
+        self.cmd('ls')
+        self.cmd('cd /backup')
+        self.cmd('cat manifest.txt')
+        data = self.cmd('find *.dat')
+        self.assertIn('/backup/reference/research.dat', data['mission_log'][-1]['text'])
+        self.slot.refresh_from_db()
+        self.assertEqual(self.slot.mission_state['work'] - before, 12)
+        self.assertEqual(self.slot.balance, balance)
+        self.assertTrue(self.slot.mission_state['dirty'])
+        self.cmd('cd /')
+        self.assertIn('directory removal', self.cmd('rm /backup')['mission_log'][-1]['text'].lower())
+        self.assertEqual(self.cmd('pwd')['mission_log'][-1]['text'], '/')
+
+    @override_settings(DEBUG=True)
+    def test_generator_places_wordpress_database_at_explicit_path_and_validates_options(self):
+        from .models import GeneratedMission
+        call_command('generate_content', 'missions', count=1, service='wordpress', objective='retrieve', artifact_dir='/var/www', filename='users.db', stdout=StringIO())
+        job = GeneratedMission.objects.get().data
+        self.assertEqual(job['file'], 'users.db')
+        self.assertEqual(job['artifact_path'], 'var/www/users.db')
+        self.reserve(public_code(job['id']))
+        self.cmd(f'connect {job["target"]}')
+        self.cmd(f'scan {job["target"]}')
+        self.cmd('crack 443')
+        self.cmd('cd /var/www')
+        self.assertIn('users.db', self.cmd('ls')['mission_log'][-1]['text'])
+        self.cmd('get users.db')
+        self.clean_exit()
+        self.assertIn('Delivery verified', self.cmd('submit')['mission_log'][-1]['text'])
+        for options in [dict(filename='../bad.db'), dict(filename='bad\\name'), dict(artifact_dir='relative'), dict(filename='bad\nname')]:
+            with self.assertRaises(CommandError):
+                call_command('generate_content', 'missions', count=1, stdout=StringIO(), **options)
+        with self.assertRaises(CommandError):
+            call_command('generate_content', 'servers', count=1, placement='nested', stdout=StringIO())
+
+    @override_settings(DEBUG=True)
+    def test_generator_root_and_nested_placements_are_service_aware(self):
+        from .models import GeneratedMission
+        call_command('generate_content', 'missions', count=1, service='rdp', placement='nested', objective='retrieve', stdout=StringIO())
+        nested = GeneratedMission.objects.get().data
+        self.assertTrue(nested['artifact_path'].startswith('Users/admin/Documents/'))
+        call_command('generate_content', 'missions', count=1, service='wordpress', placement='root', objective='retrieve', stdout=StringIO())
+        root = GeneratedMission.objects.exclude(pk=nested['id']).get().data
+        self.assertEqual(root['artifact_path'], root['file'])
+
+    def test_rdp_paths_and_encrypted_nested_archives_work_with_local_decryption(self):
+        from .persistence import ensure_server
+        self.launch('terminal')
+        self.slot.refresh_from_db()
+        self.slot.installed_software.append('decryptor-1-standard')
+        self.slot.save()
+        self.reserve('0-5')
+        target = dict(CONTRACT_BY_ID['0-5'])
+        server = ensure_server(self.slot, target)
+        server.files[0]['encrypted'] = True
+        server.save()
+        self.cmd('connect helix-5.internal')
+        self.cmd('scan helix-5.internal')
+        self.cmd('crack 3389')
+        self.cmd('cd /Users/admin/Documents')
+        self.cmd('get desktop-archive.dat')
+        self.clean_exit()
+        self.assertIn('archive is encrypted', self.cmd('submit')['mission_log'][-1]['text'])
+        self.cmd('decrypt desktop-archive.dat')
+        self.assertIn('Delivery verified', self.cmd('submit')['mission_log'][-1]['text'])
+
+    def test_decrypting_one_file_does_not_decrypt_other_downloads(self):
+        self.gain_access('0-1')
+        self.slot.refresh_from_db()
+        self.slot.installed_software.append('decryptor-1-standard')
+        self.slot.save()
+        self.cmd('decrypt /ledger.enc')
+        server = self.slot.server_states.get(address='helix-1.internal')
+        server.files.append(dict(name='var/www/decoy.enc', original='var/www/decoy.enc', type='file', size=2, encrypted=True, present=True))
+        server.save()
+        data = self.cmd('get /var/www/decoy.enc')
+        self.assertTrue(data['local_files'][0]['encrypted'])
+        self.cmd('decrypt /var/www/decoy.enc')
+        data = self.cmd('get /var/www/decoy.enc')
+        self.assertFalse(data['local_files'][0]['encrypted'])
+
+    def test_backdoor_summaries_do_not_disclose_unexplored_artifact_paths(self):
+        self.gain_access('0-3')
+        self.slot.refresh_from_db()
+        self.slot.installed_software.append('rootkit-epic')
+        self.slot.save()
+        data = self.cmd('install')
+        self.assertEqual(data['backdoors'][0]['target'], 'helix-3.internal')
+        self.assertNotIn('file', data['backdoors'][0])
+        self.assertNotIn('artifact_path', data['backdoors'][0])
+
+
+class PopulatedFilesystemMigrationTests(TransactionTestCase):
+    def test_old_primary_paths_and_deletions_survive_population(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate([('game', '0013_saveslot_irc_state')])
+        try:
+            old = executor.loader.project_state([('game', '0013_saveslot_irc_state')]).apps
+            user = old.get_model('auth', 'User').objects.create(username='fs-migration')
+            slot = old.get_model('game', 'SaveSlot').objects.create(user_id=user.pk, position=1, alias='Legacy')
+            artifact = dict(name='archive/r3/var/www/users.db', original='var/www/users.db', present=False, encrypted=True, size=24)
+            old.get_model('game', 'ServerState').objects.create(slot_id=slot.pk, address='legacy.internal', descriptor=dict(target='legacy.internal', file='users.db', size=24, encrypted=True, security=1, port=443, service='wordpress'), files=[artifact], visits=4)
+            executor = MigrationExecutor(connection)
+            executor.migrate(executor.loader.graph.leaf_nodes())
+            from .models import ServerState
+            server = ServerState.objects.get(address='legacy.internal')
+            for key, value in artifact.items():
+                self.assertEqual(server.files[0][key], value)
+            self.assertGreater(len(server.files), 20)
+            self.assertEqual(server.visits, 4)
+            self.assertTrue(any(item['name'] == 'var/www/index.php' for item in server.files))
+        finally:
+            executor = MigrationExecutor(connection)
+            executor.migrate(executor.loader.graph.leaf_nodes())

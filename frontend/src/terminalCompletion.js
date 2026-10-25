@@ -1,6 +1,6 @@
 // Completion only offers commands and names already available to this runner.
 const commands = {
-  terminal: ['exploit', 'exploits', 'applets', 'use', 'trace', 'install', 'deploy', 'abort', 'accept', 'apps', 'brief', 'clear', 'connect', 'contracts', 'decrypt', 'disconnect', 'get', 'help', 'history', 'jump', 'lockpick', 'logcleaner', 'login', 'ls', 'rm', 'route', 'rumors', 'scan', 'status', 'submit'],
+  terminal: ['exploit', 'exploits', 'applets', 'use', 'trace', 'install', 'deploy', 'abort', 'accept', 'apps', 'brief', 'cat', 'cd', 'pwd', 'find', 'clear', 'connect', 'contracts', 'decrypt', 'disconnect', 'get', 'help', 'history', 'jump', 'lockpick', 'logcleaner', 'login', 'ls', 'rm', 'route', 'rumors', 'scan', 'status', 'submit'],
   mapper: ['help', 'scan'], decryptor: ['decrypt', 'help'], monitor: ['help', 'trace'],
   bank: ['balance', 'help', 'history'], rootkit: ['help', 'install'], ransomware: ['deploy', 'help'],
 }
@@ -23,14 +23,20 @@ export function completion(text, cursor, app, slot) {
     if (verb === 'exploit') pool = (slot.exploits || []).map(item => item.id)
     if (verb === 'use') pool = slot.installed_software || []
     if (verb === 'logcleaner') pool = (slot.installed_software || []).filter(id => id.startsWith('cleaner-'))
-    if (['get', 'rm', 'decrypt'].includes(verb)) {
-      pool = !slot.connected && ['rm', 'decrypt'].includes(verb) ? (slot.local_files || []).map(file => file.name) : [slot.active_contract?.file]
-      const host = slot.remote_target || slot.active_contract?.target
-      for (const entry of (!slot.connected && ['rm', 'decrypt'].includes(verb) ? [] : slot.mission_log) || []) {
-        if (host && entry.text.startsWith(`Host: ${host}\n`)) {
-          const file = entry.text.match(/^Archive: (.*?) \/ /m)?.[1]
-          if (file && file !== 'missing') pool.push(file)
-        }
+    if (['ls', 'cd', 'cat', 'get', 'rm', 'decrypt'].includes(verb)) {
+      if (!slot.connected && ['rm', 'decrypt'].includes(verb)) pool = (slot.local_files || []).map(file => file.name)
+      else if (slot.connected) {
+        const cwd = (slot.remote_cwd || '/').split('/').filter(Boolean)
+        pool = (slot.remote_entries || []).filter(entry => ['ls', 'cd'].includes(verb) ? entry.type === 'directory' : entry.type !== 'directory').map(entry => {
+          let path = entry.path
+          if (!word.startsWith('/')) {
+            const parts = path.split('/').filter(Boolean)
+            let shared = 0
+            while (shared < cwd.length && parts[shared] === cwd[shared]) shared++
+            path = [...Array(cwd.length - shared).fill('..'), ...parts.slice(shared)].join('/') || '.'
+          }
+          return path + (entry.type === 'directory' ? '/' : '')
+        })
       }
     }
   }

@@ -201,3 +201,24 @@ Generated content lives in PostgreSQL and is included in normal `pg_dump` archiv
 
 
 The offline generator's `--service` option accepts `ssh`, `http`, `rdp`, `wordpress`, `php`, `sip`, `telnet`, `ftp`, `smtp`, `mysql`, and `redis`. Omitting it randomly selects a supported service. Ports and application release banners come from `backend/game/services.py`. Adding a new family there makes it available to the generator and IRC; authored contract assignments live in `backend/game/catalog.py`. Persistent discovered servers keep their saved service identity. Service profiles model fictional game access, not real vulnerabilities.
+
+
+### Authoring mission file placement
+
+Generated missions use mixed placement by default: roughly 70 percent at root and 30 percent in their service's normal directory. Background folders and files are automatic for generated contracts and directory servers. Use explicit options when authoring a particular mission:
+
+```bash
+bash scripts/generate-content.sh missions --count 3 --rank 0 --service wordpress --objective retrieve --filename users.db --artifact-dir /var/www
+bash scripts/generate-content.sh missions --count 3 --rank 0 --service rdp --placement nested
+bash scripts/generate-content.sh missions --count 3 --rank 0 --service mysql --placement root
+```
+
+```powershell
+.\scripts\generate-content.ps1 missions --count 3 --rank 0 --service wordpress --objective retrieve --filename users.db --artifact-dir /var/www
+.\scripts\generate-content.ps1 missions --count 3 --rank 0 --service rdp --placement nested
+.\scripts\generate-content.ps1 missions --count 3 --rank 0 --service mysql --placement root
+```
+
+`--filename` accepts a basename (up to 64 characters), and `--artifact-dir` accepts an absolute virtual directory (up to 70 characters). An explicit directory overrides random placement. These options apply only to missions. The authoring command prints the actual artifact path for review; the broker shows the filename without exposing the hidden directory. Target addresses and contract identities remain unique even when multiple missions use the same filename.
+
+Templates and service paths live in `backend/game/filesystem.py`; terminal actions live in `backend/game/remote_files.py`. Each tree stays bounded, and paths are normalized entirely inside the game's JSON filesystem. No file command invokes the host shell or operates on real paths.

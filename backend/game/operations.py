@@ -52,7 +52,7 @@ def connect_target(slot, address, backdoor=False):
         target = effective_target(slot, target)
         record_visit(slot, target, backdoor=True)
         slot.remote_host = {**target, '_backdoor': True}
-        slot.mission_state = {**(slot.mission_state if job else {}), 'access': True, 'scanned': True, 'dirty': False, 'work': 0}
+        slot.mission_state = {**(slot.mission_state if job else {}), 'access': True, 'scanned': True, 'dirty': False, 'work': 0, 'cwd': '/', 'known_paths': []}
         slot.mission_started = timezone.now()
         return f'Backdoor link established: {address}. Direct access / no proxy lease / remote logging suppressed.'
     target = find_target(slot, address)
@@ -72,7 +72,7 @@ def connect_target(slot, address, backdoor=False):
         slot.mission_state = {'scanned_revision': scanned_revision}
         state = slot.mission_state
     state.update(trace_budget=100 - target['security'] * 10 + stats['delay'] + hardware(slot)['gateway']['stealth'] * 8,
-                 work=0, trace_started=None, scanned_host=address, latency=stats['latency'], access=False, dirty=False, clean_exit=False, scanned=bool(scanned) and state.get('scanned_revision', 1) == server.revision, logs_recorded=False)
+                 work=0, cwd='/', known_paths=[], trace_started=None, scanned_host=address, latency=stats['latency'], access=False, dirty=False, clean_exit=False, scanned=bool(scanned) and state.get('scanned_revision', 1) == server.revision, logs_recorded=False)
     state.pop('password_break', None)
     state.pop('password_result', None)
     state.pop('password_ready', None)

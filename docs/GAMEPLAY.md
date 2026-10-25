@@ -178,3 +178,32 @@ These are fictional service profiles and simulated access adapters, not real vul
 The broker has 60 built-in contract templates, including the original 15. A fresh Ghost sees 24 offers across Ghost and Signal. Briefs show the service family and available access routes. Replacement jobs vary their service family while retaining the source contract's security class, objective and payout. Generated content can also select any supported service.
 
 Scans reveal the full fingerprint, including application release, authentication class and patch revision. **An HTTP exploit does not match WordPress or PHP just because all three use port 443.** A WordPress 6.4 license does not match a 6.5 service. IRC's service filter lists each family; scanning a different release or later patch adds matching intelligence to the trade board. Owned legacy SSH, HTTP and RDP licenses keep working on their matching fingerprints. Existing discovered server profiles remain durable across reconnects and updates.
+
+
+## Exploring remote filesystems
+
+All servers have a virtual filesystem with ordinary background files: configuration, logs, notes, application assets, backups and service records. WordPress/PHP hosts include `/var/www`; RDP hosts include `/Users/admin/Documents`; FTP uses `/srv/ftp`; MySQL and Redis have database data folders. RDP uses the same slash-based virtual navigation commands as other hosts, with case-sensitive names.
+
+Most mission files start at `/`, while some live in a service folder. The broker gives the filename, and scanning reveals the service without disclosing the artifact's nested path. After logging in, explore:
+
+```text
+pwd
+ls
+cat README.txt
+ls /var
+cd /var/www
+ls
+cat wp-config.php
+get cms-backup.dat
+logcleaner
+disconnect
+submit
+```
+
+`ls [directory]` lists that directory's immediate children. `cd ..` moves up; `cd` alone returns to `/`. File commands accept absolute paths such as `/var/www/users.db` or paths relative to your working directory. Tab completes files and directories you have discovered in the current connection; it does not reveal unopened folders. `find users.db` (or a pattern such as `find *.db`) searches the current subtree and reports matching absolute paths.
+
+Browsing is part of the challenge. The running trace still advances in real time; `ls` adds 2 seconds of work, `cd` and `cat` add 1 each, and `find` adds 8. There are no added CPH fees for these commands. `pwd` adds no work. Transfers and log cleanup keep their existing costs. Better proxy routes and suitable tools still help; the login/cracking screen itself remains trace-free until you enter the server.
+
+You can download or delete ordinary files too. A same-named file in `/backup/reference` is a reference copy and does **not** satisfy a contract. Only downloading or deleting the real objective at its exact path records evidence. Downloading unrelated files later does not overwrite valid proof. Local copies with the same basename receive suffixes such as `_2`, and all copies use your local drive capacity. While disconnected, use `ls`, `rm <local-name>` or `decrypt <local-name>` to manage them.
+
+Filesystem changes persist per save. Existing saves retain the objective's original location and deletion/encryption state when background files are added. Administrator maintenance restores the tree and moves the objective under `/archive/rN/`; the service folders and background records remain available. Scans do not expose the full directory tree. The operator journal retains file metadata discovered through filesystem actions.

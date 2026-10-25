@@ -4,6 +4,7 @@ import uuid
 from django.conf import settings
 from django.core.management import BaseCommand, CommandError
 from django.db import transaction, connection
+from game.filesystem import artifact_path, absolute
 from game.services import SERVICES, service_fields
 from game.models import DirectoryServer, GeneratedMission, ContractIdentity
 
@@ -15,6 +16,9 @@ class Command(BaseCommand):
         parser.add_argument('kind', choices=['missions', 'servers'])
         parser.add_argument('--count', type=int, default=1)
         parser.add_argument('--rank', type=int, choices=range(5), default=0)
+        parser.add_argument('--placement', choices=['mixed', 'root', 'nested'], default='mixed', help='Mission artifact placement; mixed puts about 30 percent in service folders.')
+        parser.add_argument('--artifact-dir', help='Explicit absolute virtual mission directory, e.g. /var/www.')
+        parser.add_argument('--filename', help='Mission filename only, e.g. users.db.')
         parser.add_argument('--service', choices=list(SERVICES), help='Choose a service fingerprint family; otherwise vary services randomly.')
         parser.add_argument('--objective', choices=['retrieve', 'delete'], help='Choose a mission objective instead of random selection.')
         parser.add_argument('--encrypted', action='store_true', help='Generate encrypted retrieval missions.')
@@ -31,6 +35,12 @@ class Command(BaseCommand):
             raise CommandError('--exploitable applies only to servers.')
         if options['kind'] == 'servers' and (options['objective'] or options['encrypted']):
             raise CommandError('--objective and --encrypted apply only to missions.')
+        if options['kind'] == 'servers' and (options['filename'] or options['artifact_dir'] or options['placement'] != 'mixed'):
+            raise CommandError('--filename, --artifact-dir and --placement apply only to missions.')
+        if options['filename'] and (len(options['filename']) > 64 or '/' in options['filename'] or chr(92) in options['filename'] or options['filename'] in ('.', '..') or any(ord(char) < 32 for char in options['filename'])):
+            raise CommandError('Use a filename of at most 64 characters without directories or control characters.')
+        if options['artifact_dir'] and (not options['artifact_dir'].startswith('/') or len(options['artifact_dir']) > 70 or any(ord(char) < 32 for char in options['artifact_dir'])):
+            raise CommandError('Use an absolute virtual artifact directory of at most 70 characters.')
         if options['objective'] == 'delete' and options['encrypted']:
             raise CommandError('Encrypted missions must use the retrieve objective.')
         with connection.cursor() as cursor:
@@ -60,15 +70,17 @@ class Command(BaseCommand):
                 key, address = token[:12], 'mission-' + token[:16] + '.internal'
                 objective = options['objective'] or ('retrieve' if options['encrypted'] else rng.choice(['retrieve', 'delete']))
                 encrypted = options['encrypted'] or (options['objective'] is None and objective == 'retrieve' and rng.choice([True, False]))
-                filename = f'{token[:6]}.{"enc" if encrypted else "dat"}'
+                filename = options['filename'] or (f'{token[:6]}.enc' if encrypted else 'users.db' if service['service'] == 'wordpress' else f'{token[:6]}.dat')
                 description = f'{"Recover" if objective == "retrieve" else "Remove"} {filename} from {address}. Leave no access logs and submit proof through the broker.'
                 data = dict(id=key, target=address, title=f'{name} // {token[:6].upper()}', client='Independent broker',
                             rank=rank, security=rank + 1, objective=objective, file=filename, encrypted=encrypted,
                             **service, size=24 + rank * 32, reward=220 + rank * 200 + rng.randrange(0, 100, 10),
                             reputation=35 + rank * 10, description=description, x=x, y=y)
+                nested = options['placement'] == 'nested' or (options['placement'] == 'mixed' and rng.random() < .3)
+                data['artifact_path'] = (absolute(options['artifact_dir'] + '/' + filename).lstrip('/') if options['artifact_dir'] else artifact_path(data, nested=nested))
                 GeneratedMission.objects.create(key=key, data=data)
                 ContractIdentity.objects.create(template_key=key, code=allocated[index])
-                created.append(f'Contract {allocated[index]} / {data["title"]} / {address}')
+                created.append(f'Contract {allocated[index]} / {data["title"]} / {address} / artifact: /{data["artifact_path"]}')
         for line in created:
             self.stdout.write(line)
         self.stdout.write(self.style.SUCCESS(f'Created {count} {options["kind"]}. Content is stored in PostgreSQL and included in pg_dump.'))

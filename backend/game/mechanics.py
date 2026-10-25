@@ -18,6 +18,9 @@ from .persistence import (current_target, effective_target, ensure_server, event
                           sync_remote_logs, clear_remote_logs)
 
 
+from .filesystem import FilesystemError, resolve_file
+
+
 class GameError(Exception):
     pass
 
@@ -57,7 +60,7 @@ def copy_to_local(slot, job):
             name = f'{path.stem}_{index}{path.suffix}'
             index += 1
         file_id = uuid4().hex
-    entry = dict(id=file_id, name=name, size=job['size'], source=job['target'], source_path=job['file'], revision=job.get('server_revision', 1), encrypted=bool(job['encrypted'] and not slot.mission_state.get('decrypted')), security=job['security'], downloaded_at=timezone.now().isoformat())
+    entry = dict(id=file_id, name=name, size=job['size'], source=job['target'], source_path=job['file'], revision=job.get('server_revision', 1), encrypted=bool(job['encrypted']), security=job['security'], downloaded_at=timezone.now().isoformat())
     slot.local_files = [item for item in slot.local_files if item['id'] != file_id] + [entry]
     return entry
 
@@ -277,8 +280,9 @@ def trade(slot, action, product_id):
 
 
 MANUALS = {
+    'filesystem': 'VIRTUAL REMOTE FILESYSTEM\nls [path] — list a directory (2s trace work)\ncd [path] — change directory (1s); cd alone returns to /\npwd — current directory\ncat <path> — preview text (1s)\nfind <filename-or-glob> — search the current subtree (8s)\nget <path> — download any file; only the exact objective path produces proof\nrm <path> — delete one file; directories cannot be deleted\nUse absolute /paths or relative paths, including .. . Local ls, rm and decrypt work while disconnected. Browsing adds work to the running trace; logs still need cleanup.',
     'exploit': 'FINGERPRINT EXPLOITS\nBuy licenses or single-use copies in IRC Underground with CPH.\nexploits — list owned fingerprint tools\nexploit <id> — use on the connected, freshly scanned server\nMatch protocol, auth version and patch revision exactly. Uses 2 GB transient RAM.\nA lifetime license is reusable for that fingerprint; single-use copies burn on successful entry only.\nSuccess opens an admin shell immediately, starts a trace and leaves access logs. Clean logs before disconnecting.',
-    'terminal': 'LOCAL SHELL\nexploits — list owned fingerprint exploits\nexploit <id> — instant shell using a matching exploit from IRC Underground\napplets — list owned terminal software\nuse <license-id> — select an applet version\ntrace — licensed Tripwire telemetry\ninstall — install owned Wraith rootkit\ndeploy <host> — deploy owned Eclipse ransomware\nhelp — application manual\nrumors — intercepted hidden-service invitation\njump <host> — use an installed Wraith backdoor\napps — running processes and RAM\ncontracts — broker listings\naccept <contract-id> — reserve by the numeric ID in contracts (0–255)\nbrief — read the accepted brief\nroute — inspect the committed proxy chain\nconnect <host> — dial a fictional target\nscan <host> — scan with owned Cartograph software\nlogcleaner [license-id] — erase remote logs with an owned Logcleaner license\nlockpick — open the server login dialog\nstatus — gateway status\nhistory — recent operator journal for this target\ndecrypt <local-file> — decrypt a local archive with owned Rosetta software while disconnected\nls — list local files when disconnected; remote files when logged in\nget <file> — copy a readable file to local storage\nrm <file> — remove a local file when disconnected; a remote file when logged in\ndisconnect — end the remote session\nsubmit — deliver evidence to the broker\nabort — abandon the contract (fine and reputation loss)\nclear — clear local console output',
+    'terminal': 'LOCAL SHELL\nexploits — list owned fingerprint exploits\nexploit <id> — instant shell using a matching exploit from IRC Underground\napplets — list owned terminal software\nuse <license-id> — select an applet version\ntrace — licensed Tripwire telemetry\ninstall — install owned Wraith rootkit\ndeploy <host> — deploy owned Eclipse ransomware\nhelp — application manual\nrumors — intercepted hidden-service invitation\njump <host> — use an installed Wraith backdoor\napps — running processes and RAM\ncontracts — broker listings\naccept <contract-id> — reserve by the numeric ID in contracts (0–255)\nbrief — read the accepted brief\nroute — inspect the committed proxy chain\nconnect <host> — dial a fictional target\nscan <host> — scan with owned Cartograph software\nlogcleaner [license-id] — erase remote logs with an owned Logcleaner license\nlockpick — open the server login dialog\nstatus — gateway status\nhistory — recent operator journal for this target\ndecrypt <local-file> — decrypt a local archive with owned Rosetta software while disconnected\nls [path] — list local files or a remote directory\ncd [path] — change remote directory\npwd — print remote working directory\ncat <path> — preview a remote text file\nfind <filename> — search under the current remote directory (8s trace work)\nget <file> — copy a readable file to local storage\nrm <file> — remove a local file when disconnected; a remote file when logged in\ndisconnect — end the remote session\nsubmit — deliver evidence to the broker\nabort — abandon the contract (fine and reputation loss)\nclear — clear local console output',
     'mapper': 'CARTOGRAPH\nscan <host> — inspect a fictional host and its services\nCosts 1 + tool tier CPH. Scan quality depends on tool capability.',
     'cracker': 'LOCKPICK\nUse login in the primary terminal to open the password decoder. Connect to a server login and scan its authentication service first.',
     'decryptor': 'ROSETTA\ndecrypt <file> — decode an encrypted remote archive\nRequires file access and a sufficient decryption engine.',
@@ -341,7 +345,7 @@ def execute(slot, app, raw):
     verb, args = parts[0].lower(), parts[1:]
     remote = session_target(slot) if app == 'terminal' and slot.mission_started and slot.mission_state.get('access') else None
     prompt = f'admin@{remote["target"]}' if remote else f'{slot.alias}@{app}'
-    log(slot, app, f'{prompt}:~$ {raw}')
+    log(slot, app, f'{prompt}:{slot.mission_state.get("cwd", "/") if remote else "~"}$ {raw}')
     if verb == 'clear' and app == 'terminal':
         slot.mission_log = [entry for entry in slot.mission_log if entry.get('app') != app]
         return
@@ -367,7 +371,7 @@ def execute(slot, app, raw):
             result = _shell(slot, verb, args, job)
         else:
             raise GameError('Use the primary terminal for software applets.')
-    except GameError as exc:
+    except (GameError, FilesystemError) as exc:
         result = str(exc)
         if slot.mission_started:
             slot.mission_state['work'] = slot.mission_state.get('work', 0) + 6
@@ -405,7 +409,7 @@ def scan_target(slot, address):
     event(server, 'scanned', f'Service fingerprint observed: port {target["port"]}, revision {server.revision}.')
     server.save()
     state.update(scanned_revision=server.revision, scanned=True, scanned_host=target['target'])
-    return f'Host: {target["target"]}\n{target["port"]}/{transport}  OPEN  auth-v{target["security"]} / patch r{target.get("server_revision", 1)}\nArchive: {target["file"] if target.get("file_present", True) else "missing"} / {target["size"]} MB / {"encrypted" if target["encrypted"] else "plaintext"}\nFingerprint: {service}\nAccess: Lockpick admin login / matching exploit optional.\nOther ports: filtered. Scan complete.'
+    return f'Host: {target["target"]}\n{target["port"]}/{transport}  OPEN  auth-v{target["security"]} / patch r{target.get("server_revision", 1)}\nArchive: {PurePosixPath(target["file"]).name if target.get("file_present", True) else "missing"} / {target["size"]} MB / {"encrypted" if target["encrypted"] else "plaintext"}\nFingerprint: {service}\nAccess: Lockpick admin login / matching exploit optional.\nOther ports: filtered. Scan complete.'
 
 
 def clean_logs(slot, license_id=None):
@@ -426,9 +430,10 @@ def decrypt_local(slot, name):
     if slot.mission_started:
         require_login(slot)
         target = current_target(slot)
-        if name != target['file'] or not target.get('file_present', True):
-            raise GameError('Archive unavailable or access denied.')
-        if not target['encrypted']:
+        server = ensure_server(slot, target)
+        entry = resolve_file(server.files, name, slot.mission_state.get('cwd', '/'))
+        target = {**target, 'file': entry['name'], 'size': entry['size'], 'encrypted': entry['encrypted']}
+        if not entry['encrypted']:
             raise GameError('This file is not encrypted.')
         charged, tool = _tool_work(slot, 'decryptor', 18)
         if not charged:
@@ -506,6 +511,12 @@ def _shell(slot, verb, args, job):
         if len(args) > 1:
             raise GameError('Use logcleaner [license-id].')
         return clean_logs(slot, args[0] if args else None)
+    if verb in ('ls', 'cd', 'pwd', 'cat', 'find', 'get', 'rm') and (slot.mission_started or verb not in ('ls', 'rm')):
+        valid = (verb in ('ls', 'cd') and len(args) <= 1) or (verb == 'pwd' and not args) or (verb in ('cat', 'find', 'get', 'rm') and len(args) == 1)
+        if not valid:
+            raise GameError(f'Invalid arguments for {verb}. Use help filesystem.')
+        from .remote_files import command
+        return command(slot, verb, args, job)
     if verb not in arity or len(args) != arity[verb]:
         raise GameError('Unknown shell command or arguments. Read help for the shell manual.')
     state = slot.mission_state
@@ -580,21 +591,4 @@ def _shell(slot, verb, args, job):
         state.update(clean_exit=True, access=False, trace_started=None)
         slot.remote_host = {}
         return 'Remote link closed. No access signature found.'
-    if verb in ('ls', 'get', 'rm'):
-        if verb == 'ls' and not args:
-            state['dirty'] = True
-            record_action(slot, job, 'directory_listed', 'Remote directory inspected.', snapshot=True)
-            return 'Directory empty.' if not job.get('file_present', True) else f'{job["file"]}  {job["size"]} MB  {"encrypted" if job["encrypted"] and not state.get("decrypted") else "readable"}'
-        if len(args) != 1 or args[0] != job['file'] or not job.get('file_present', True):
-            raise GameError('File not found.')
-        if verb == 'get':
-            local = copy_to_local(slot, job)
-            record_action(slot, job, 'file_retrieved', f'{job["file"]} copied to local storage.')
-            state.update(recovered=True, local_file_id=local['id'], dirty=True)
-            state['work'] = state.get('work', 0) + math.ceil(job['size'] / hardware(slot)['gateway']['bandwidth'] + state.get('latency', 0) / 10)
-            return f'Copied {job["file"]} to local storage. {job["size"]} MB verified.\nLocal file: {local["name"]} ({"encrypted" if local['encrypted'] else "readable"}) / drive usage {storage_used(slot)} MB.'
-        if verb == 'rm':
-            record_action(slot, job, 'file_deleted', f'{job["file"]} removed from the remote filesystem.', delete=True)
-            state.update(deleted=True, dirty=True)
-            return f'{job["file"]} removed. Deletion receipt stored locally.'
     raise GameError('Unknown shell command or arguments. Read help for the shell manual.')

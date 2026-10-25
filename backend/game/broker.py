@@ -4,6 +4,7 @@ from pathlib import PurePosixPath
 from uuid import uuid4
 from secrets import choice
 from .services import SERVICES, service_fields
+from .filesystem import artifact_path
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
@@ -57,6 +58,7 @@ def settle_broker(slot):
                'title': f'{["Lumen","Redwood","Silverline","Arcadia"][int(nonce[0],16)%4]} dossier {nonce[:6]} // {template["objective"]}',
                'x': 220 + int(nonce[1:4],16)%640, 'y': 120 + int(nonce[4:7],16)%230}
         job.update(service_fields(list(SERVICES)[int(nonce[7:9], 16) % len(SERVICES)]))
+        job['artifact_path'] = artifact_path(job, nested=int(nonce[9], 16) < 5)
         job['description'] = f'{"Recover" if job["objective"] == "retrieve" else "Delete"} {job["file"]} from {job["target"]}. Leave no remote access logs and deliver proof through the broker.' + (' The archive is encrypted.' if job['encrypted'] else '')
         slot.broker_jobs = {**slot.broker_jobs, job['id']: job}
         changed = True

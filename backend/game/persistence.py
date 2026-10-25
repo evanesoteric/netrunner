@@ -5,12 +5,14 @@ from .models import ServerState, ServerEvent
 from .world import session_target
 from .services import service_key, SERVICES, UNKNOWN_SERVICE
 
+from .filesystem import build_tree, LAYOUT_VERSION, absolute
+import posixpath
+
 MAINTENANCE_SECONDS = 600
 
 
 def initial_files(target):
-    return [dict(name=target['file'], original=target['file'], size=target['size'],
-                 encrypted=target['encrypted'], present=True)]
+    return build_tree(target)
 
 
 def event(server, kind, summary):
@@ -19,10 +21,14 @@ def event(server, kind, summary):
 
 def ensure_server(slot, target):
     server, created = ServerState.objects.get_or_create(slot=slot, address=target['target'], defaults={
-        'descriptor': {key: value for key, value in target.items() if not key.startswith('_')},
+        'descriptor': {**{key: value for key, value in target.items() if not key.startswith('_')}, 'filesystem_layout': LAYOUT_VERSION},
         'files': initial_files(target), 'security': target['security'], 'port': target['port'],
         'backdoor_installed': any(entry['target'] == target['target'] for entry in slot.backdoors),
     })
+    if server.descriptor.get('filesystem_layout') != LAYOUT_VERSION:
+        server.files = build_tree(server.descriptor, existing=server.files)
+        server.descriptor['filesystem_layout'] = LAYOUT_VERSION
+        server.save(update_fields=['files', 'descriptor'])
     if created:
         event(server, 'discovered', 'Server added to this runner’s persistent world.')
     return server
@@ -47,10 +53,16 @@ def current_target(slot):
     return effective_target(slot, session_target(slot))
 
 
-def observe(server):
+def observe(server, directory=None, path=None):
     key = service_key(server.descriptor)
+    seen = {item['name']: item for item in server.observed.get('files', [])}
+    for item in server.files:
+        if item.get('type') == 'directory':
+            continue
+        if item['name'] in seen or (directory is not None and posixpath.dirname(absolute(item['name'])) == directory) or item['name'] == path:
+            seen[item['name']] = {key: value for key, value in item.items() if key != 'content'}
     server.observed = dict(service=key, service_version=server.descriptor.get('service_version', SERVICES.get(key, UNKNOWN_SERVICE)['release']), revision=server.revision, port=server.port, security=server.security,
-                           files=server.files, at=timezone.now().isoformat())
+                           files=list(seen.values()), at=timezone.now().isoformat())
 
 
 def schedule(server, due=None):
@@ -67,9 +79,7 @@ def settle_world(slot):
         due = due.exclude(address=active['target'])
     for server in due:
         server.revision += 1
-        server.files = initial_files(server.descriptor)
-        for artifact in server.files:
-            artifact['name'] = f'archive/r{server.revision}/{artifact["original"]}'
+        server.files = build_tree(server.descriptor, revision=server.revision)
         original_port = server.descriptor['port']
         alternate_port = 2222 if original_port == 22 else 8443 if original_port in (80, 443) else original_port
         server.port = alternate_port if server.revision % 2 == 0 else original_port
@@ -88,7 +98,7 @@ def record_visit(slot, target, backdoor=False):
     server.save()
 
 
-def record_action(slot, target, kind, summary, *, delete=False, decrypt=False, snapshot=False):
+def record_action(slot, target, kind, summary, *, delete=False, decrypt=False, snapshot=False, directory=None):
     server = ensure_server(slot, target)
     if delete or decrypt:
         for artifact in server.files:
@@ -99,7 +109,7 @@ def record_action(slot, target, kind, summary, *, delete=False, decrypt=False, s
                 if decrypt:
                     artifact['encrypted'] = False
     if snapshot or delete or decrypt:
-        observe(server)
+        observe(server, directory=(directory if directory is not None else slot.mission_state.get('cwd', '/')) if snapshot else None, path=target['file'] if delete or decrypt else None)
     event(server, kind, summary)
     server.save()
 

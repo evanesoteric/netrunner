@@ -71,6 +71,8 @@ def serialize(slot, detailed=False):
         'password_break': slot.mission_state.get('password_break') if slot.mission_started else None,
         'password_result': slot.mission_state.get('password_result') if slot.mission_started else None,
         'login_service': {'port': target['port'], 'security': target['security'], 'name': service_name(target)} if target and slot.mission_started and slot.mission_state.get('scanned') and slot.mission_state.get('scanned_host') == target['target'] and slot.mission_state.get('scanned_revision', 1) == target.get('server_revision', 1) else None,
+        'remote_cwd': slot.mission_state.get('cwd', '/') if slot.mission_started and slot.mission_state.get('access') else None,
+        'remote_entries': slot.mission_state.get('known_paths', []) if slot.mission_started and slot.mission_state.get('access') else [],
         'remote_target': target['target'] if target and slot.mission_started else None,
         'stealth_session': bool(slot.remote_host.get('_backdoor')),
         'remote_node': {key: target[key] for key in ('target', 'x', 'y')} if target and slot.mission_started else None,
@@ -109,7 +111,7 @@ def serialize(slot, detailed=False):
             'ram_used': ram_used(slot),
             'catalog': [item for item in PRODUCTS.values() if not item.get('black_market') or item['id'] in slot.installed_software],
             'black_market_catalog': [item for item in PRODUCTS.values() if item.get('black_market')] if slot.market_unlocked else [],
-            'backdoors': [{key: value for key, value in entry.items() if key != 'id'} for entry in slot.backdoors] if 'rootkit-epic' in slot.installed_software else [],
+            'backdoors': [{key: value for key, value in entry.items() if key in {'target', 'name', 'title', 'rank', 'server_id', 'security', 'port'}} for entry in slot.backdoors] if 'rootkit-epic' in slot.installed_software else [],
             'ransomware_ops': slot.ransomware_ops,
             'builtins': list(BUILTIN_APPS.values()), 'relays': [server for server in servers if server['id'] in slot.atlas_nodes], 'network_directory': servers, 'atlas_nodes': slot.atlas_nodes, 'home_node': HOME_NODE,
             'proxy_route': slot.proxy_route, 'route_stats': route_stats(slot),
@@ -120,7 +122,7 @@ def serialize(slot, detailed=False):
 @ensure_csrf_cookie
 @api(['GET'], authenticated=False)
 def session(request):
-    return JsonResponse({'user': {'username': request.user.username} if request.user.is_authenticated else None, 'currency': CURRENCY, 'ranks': RANKS, 'version': '0.16.0', 'server_time': timezone.now().isoformat()})
+    return JsonResponse({'user': {'username': request.user.username} if request.user.is_authenticated else None, 'currency': CURRENCY, 'ranks': RANKS, 'version': '0.17.0', 'server_time': timezone.now().isoformat()})
 
 @api(['POST'], authenticated=False)
 def register(request):

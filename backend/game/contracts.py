@@ -12,7 +12,7 @@ def public_job(job, mapping=None):
     if job is None:
         return None
     mapping = codes() if mapping is None else mapping
-    return {**job, 'service_name': service_name(job), 'id': str(mapping[job['id']])}
+    return {**{key: value for key, value in job.items() if key != 'artifact_path'}, 'service_name': service_name(job), 'id': str(mapping[job['id']])}
 
 
 def public_code(key, slot=None):

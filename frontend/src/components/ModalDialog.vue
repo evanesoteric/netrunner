@@ -7,11 +7,12 @@ let previous
 function keys(event) {
   if (event.key === 'Escape') { event.preventDefault(); emit('close'); return }
   if (event.key !== 'Tab') return
-  const items = [...panel.value.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled), [tabindex="0"]')]
+  const selector = 'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex="0"]'
+  const items = [...panel.value.querySelectorAll(selector), ...document.querySelectorAll('[data-modal-control]:not(:disabled)')].filter(item => item.getClientRects().length && !item.closest('[inert]'))
   if (!items.length) { event.preventDefault(); panel.value.focus(); return }
-  const first = items[0], last = items[items.length - 1]
-  if (event.shiftKey && (document.activeElement === first || document.activeElement === panel.value)) { event.preventDefault(); last.focus() }
-  else if (!event.shiftKey && (document.activeElement === last || document.activeElement === panel.value)) { event.preventDefault(); first.focus() }
+  const index = items.indexOf(document.activeElement)
+  const next = index < 0 ? (event.shiftKey ? items.length - 1 : 0) : (index + (event.shiftKey ? -1 : 1) + items.length) % items.length
+  event.preventDefault(); items[next].focus()
 }
 onMounted(() => { previous = document.activeElement; panel.value.focus(); document.addEventListener('keydown', keys) })
 onBeforeUnmount(() => { document.removeEventListener('keydown', keys); if (props.restoreFocus && previous?.isConnected) setTimeout(() => previous.focus({ preventScroll: true }), 0) })

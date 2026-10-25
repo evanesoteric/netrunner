@@ -37,7 +37,7 @@ const nav = computed(() => [
   { id: 'exchange', label: 'Store', icon: Cpu },
   { id: 'irc', label: 'IRC Underground', icon: Radio },
   { id: 'launcher', label: 'Applications', icon: Grid2X2 },
-  { id: 'notes', label: 'Field Notes', icon: NotebookPen, Mail },
+  { id: 'notes', label: 'Field Notes', icon: NotebookPen },
   { id: 'history', label: 'Server Histories', icon: Activity },
   { id: 'blackmarket', label: 'Null Exchange', icon: LockKeyhole, visible: !!slot.value?.market_unlocked },
   { id: 'backdoors', label: 'Backdoored Servers', icon: ShieldCheck, visible: !!slot.value?.installed_software.includes('rootkit-epic') },
@@ -248,7 +248,7 @@ onUnmounted(() => { clearInterval(clock); clearInterval(poller) })
   <div class="app-shell" :inert="loginDialog || !!buildProduct">
     <aside class="sidebar">
       <a class="brand" href="#" @click.prevent="page = 'overview'" aria-label="Netrunner home"><span class="brand-icon"><Terminal :size="23" /></span><span>netrunner<span class="brand-dot">_</span><small>INDEPENDENT NETWORK ACCESS</small></span></a>
-      <div class="workspace-label">WORKSPACE <span>V.0.21</span></div>
+      <div class="workspace-label">WORKSPACE <span>V.0.22</span></div>
       <nav aria-label="Main navigation">
         <button v-for="item in nav" :key="item.id" :aria-label="item.label" :class="['nav-item', { active: page === item.id }]" @click="navigate(item)" :disabled="!slot || busy" :aria-current="page === item.id ? 'page' : undefined"><component :is="item.icon" :size="18" /><span>{{ item.label }}</span><span v-if="item.id === 'mail' && slot?.mail_unread" class="nav-count">{{ slot.mail_unread }}</span><span v-if="item.id === 'broker' && slot" class="nav-count">{{ slot.contracts.length }}</span><span v-if="item.id === 'terminal' && slot?.active_contract" class="live-dot"></span></button>
       </nav>

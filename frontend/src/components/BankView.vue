@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
 import { Landmark, Activity, ArrowUpRight } from 'lucide-vue-next'
+import { requestReference } from '../requestReference'
 import TerminalConsole from './TerminalConsole.vue'
 defineEmits(['mail'])
 const props = defineProps({ slot: Object, busy: Boolean, api: Function, send: Function, transact: Function })
@@ -22,17 +23,10 @@ async function load(page = 1, fresh = false) {
   } catch (failure) { if (!disposed && marker === version) error.value = failure.message }
   finally { if (!disposed && marker === version) loading.value = false }
 }
-function transactionReference() {
-  if (crypto.randomUUID) return crypto.randomUUID()
-  const bytes = crypto.getRandomValues(new Uint8Array(16))
-  bytes[6] = (bytes[6] & 15) | 64; bytes[8] = (bytes[8] & 63) | 128
-  const hex = [...bytes].map(byte => byte.toString(16).padStart(2, '0')).join('')
-  return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`
-}
 async function action(kind, raw, settlement = null) {
   if (disabled.value) return
   const amount = Number(raw), signature = `${info.value.identity}:${kind}:${amount}:${settlement?.reference || ''}`
-  if (!pending || pending.signature !== signature) pending = { signature, request_id:transactionReference() }
+  if (!pending || pending.signature !== signature) pending = { signature, request_id:requestReference() }
   submitting.value = true; version++; loading.value = false; message.value = ''; error.value = ''
   try {
     const result = await props.transact({ action:kind, amount, identity:info.value.identity, request_id:pending.request_id, ...(settlement ? { case_reference:settlement.reference, recipient:settlement.account } : {}) }, props.slot.id)

@@ -3311,3 +3311,126 @@ class EmailAndAssignmentTests(APIHelpers, TestCase):
         self.assertEqual(assignment.key, '0-2')
         self.assertTrue(assignment.state['deleted'])
         self.assertEqual(assignment.mail.filter(kind='briefing').count(), 1)
+
+
+class AuditRegressionTests(APIHelpers, TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user('audit-runner')
+        self.client.force_login(self.user)
+        self.slot = SaveSlot.objects.create(user=self.user, position=1, alias='Audit')
+
+    def maintenance(self, address):
+        server = self.slot.server_states.get(address=address)
+        server.maintenance_due = timezone.now()-timedelta(seconds=1)
+        server.save()
+        self.refresh()
+        return server
+
+    def test_restored_single_deletion_requires_deleting_the_current_copy(self):
+        self.gain_access('0-2'); self.cmd('rm audit.log'); self.clean_exit()
+        self.maintenance('helix-2.internal')
+        rejected = self.cmd('submit')
+        self.assertIn('target file is present again', rejected['mission_log'][-1]['text'])
+        self.assertEqual(rejected['completed'], 0)
+        self.cmd('scan helix-2.internal'); self.cmd('connect helix-2.internal'); self.cmd('crack 2222')
+        self.cmd('rm /archive/r2/audit.log'); self.clean_exit()
+        self.assertIn('Delivery verified', self.cmd('submit')['mission_log'][-1]['text'])
+
+    def test_recovery_receipt_survives_server_archive_rotation(self):
+        self.gain_access(); self.cmd('get research.dat'); self.clean_exit()
+        self.slot.refresh_from_db()
+        receipt = self.slot.mission_state['recovery_receipt']
+        self.assertEqual(receipt['source_path'], 'research.dat')
+        self.maintenance('helix-0.internal')
+        self.assertIn('Delivery verified', self.cmd('submit')['mission_log'][-1]['text'])
+        self.assertEqual(self.refresh()['completed'], 1)
+
+    def test_legacy_recovery_proof_survives_original_file_relocation(self):
+        self.gain_access(); self.clean_exit()
+        self.maintenance('helix-0.internal')
+        self.cmd('scan helix-0.internal'); self.cmd('connect helix-0.internal'); self.cmd('crack 2222')
+        self.cmd('get /archive/r2/research.dat'); self.clean_exit()
+        self.slot.refresh_from_db(); self.slot.mission_state.pop('recovery_receipt'); self.slot.save()
+        self.maintenance('helix-0.internal')
+        self.assertIn('Delivery verified', self.cmd('submit')['mission_log'][-1]['text'])
+
+    def test_modifying_provenance_cannot_reuse_a_valid_recovery_receipt(self):
+        self.gain_access(); self.cmd('get research.dat'); self.clean_exit()
+        self.slot.refresh_from_db()
+        self.slot.local_files[0]['source_path'] = 'backup/reference/research.dat'
+        self.slot.save()
+        self.assertIn('provenance does not match', self.cmd('submit')['mission_log'][-1]['text'])
+        self.assertEqual(self.refresh()['completed'], 0)
+
+    def test_brief_and_assignment_list_work_without_shadowing_public_ids(self):
+        self.reserve('purge-0')
+        brief = self.cmd('brief')['mission_log'][-1]['text']
+        self.assertIn('ERASE ALL COPIES', brief)
+        self.assertIn('PENDING /bak/audit.log', brief)
+        listing = self.cmd('assignments')['mission_log'][-1]['text']
+        self.assertIn('Ashfall audit', listing)
+        self.assertIn(public_code('purge-0', self.slot), listing)
+
+    def test_existing_server_does_not_rebuild_its_filesystem(self):
+        from unittest.mock import patch
+        from .persistence import ensure_server
+        job = CONTRACT_BY_ID['0-0']
+        expected = ensure_server(self.slot, job)
+        with patch('game.persistence.initial_files', side_effect=AssertionError('Unexpected filesystem regeneration')):
+            self.assertEqual(ensure_server(self.slot, job).pk, expected.pk)
+
+    def test_cached_address_lookups_do_not_open_savepoints(self):
+        from .addresses import address_scope, ip_for, prime_addresses
+        host = 'cache-regression.internal'; expected = ip_for(host)
+        with transaction.atomic(), address_scope():
+            prime_addresses([host])
+            with self.assertNumQueries(0):
+                for _ in range(100):
+                    self.assertEqual(ip_for(host), expected)
+
+    def test_game_refresh_has_bounded_database_work_and_compresses_responses(self):
+        import gzip
+        from django.test.utils import CaptureQueriesContext
+        self.refresh()
+        with CaptureQueriesContext(connection) as captured:
+            response = self.client.get(f'/api/slots/{self.slot.pk}/')
+        self.assertLess(len(captured), 50)
+        compressed = self.client.get(f'/api/slots/{self.slot.pk}/', HTTP_ACCEPT_ENCODING='gzip')
+        self.assertEqual(compressed['Content-Encoding'], 'gzip')
+        self.assertEqual(json.loads(gzip.decompress(compressed.content))['id'], self.slot.pk)
+        self.assertLess(len(compressed.content), len(response.content) * 0.3)
+
+    def test_mail_filters_and_bulk_read_are_scoped_to_the_visible_snapshot(self):
+        from .mailbox import incoming, BROKER, AGENCY
+        for index in range(30):
+            incoming(self.slot, BROKER, f'Archived topic {index}', 'Needle in a local dossier')
+        unmatched = incoming(self.slot, AGENCY, 'Other subject', 'Do not change this message')
+        endpoint = f'/api/{self.endpoint("mail")}/'
+        data = self.client.get(endpoint, dict(q='needle', unread='1')).json()
+        self.assertEqual(data['total'], 30); self.assertEqual(data['pages'], 2)
+        newest = incoming(self.slot, BROKER, 'New topic', 'Needle arrived after the snapshot')
+        self.post(self.endpoint('mail'), dict(action='read_all', identity=self.slot.created_at.isoformat(), folder='inbox',
+                  q='needle', unread='1', snapshot=data['snapshot']))
+        unmatched.refresh_from_db(); newest.refresh_from_db()
+        self.assertFalse(unmatched.read); self.assertFalse(newest.read)
+        self.assertEqual(self.slot.mail.filter(read=True).count(), 30)
+        self.assertEqual(self.client.get(endpoint, dict(q='needle', unread='1')).json()['total'], 1)
+        self.assertEqual(self.client.get(endpoint, dict(q='x'*121)).status_code, 400)
+        self.assertEqual(self.client.get(endpoint, dict(category='unknown')).status_code, 400)
+
+    def test_mail_status_and_matching_new_message_indicators(self):
+        from .mailbox import incoming, BROKER, LEGAL_ACCOUNT, open_case, pay_case
+        self.reserve()
+        case = open_case(self.slot, 'Test archive', 90, 'Trace identified')
+        data = self.client.get(f'/api/{self.endpoint("mail")}/', dict(category='contracts')).json()
+        self.assertEqual(data['messages'][0]['assignment_status'], 'accepted')
+        incoming(self.slot, BROKER, 'Unrelated personal mail', 'No assignment attached')
+        anchored = self.client.get(f'/api/{self.endpoint("mail")}/', dict(category='contracts', snapshot=data['snapshot'])).json()
+        self.assertFalse(anchored['has_newer'])
+        self.assertEqual(anchored['total'], 1)
+        pay_case(self.slot, str(case.reference), LEGAL_ACCOUNT, 90); self.slot.save()
+        agency = self.client.get(f'/api/{self.endpoint("mail")}/', dict(category='agency')).json()
+        self.assertEqual(agency['messages'][0]['case_status'], 'paid')
+        receipts = self.client.get(f'/api/{self.endpoint("mail")}/', dict(category='receipts')).json()
+        self.assertEqual(receipts['total'], 1)
+        self.assertEqual(receipts['messages'][0]['kind'], 'bank_receipt')

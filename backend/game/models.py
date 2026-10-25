@@ -82,6 +82,7 @@ class LedgerEntry(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     class Meta:
         ordering = ['-id']
+        indexes = [models.Index(fields=['slot', '-id'], name='ledger_save_history_idx')]
 
 
 class ContractIdentity(models.Model):
@@ -133,6 +134,7 @@ class ServerEvent(models.Model):
 
     class Meta:
         ordering = ['-id']
+        indexes = [models.Index(fields=['server', '-id'], name='server_event_history_idx')]
 
 
 class NetworkAddress(models.Model):
@@ -195,4 +197,7 @@ class MailMessage(models.Model):
 
     class Meta:
         ordering = ['-id']
+        indexes = [models.Index(fields=['slot', '-id'], name='mail_save_history_idx'),
+                   models.Index(fields=['slot', 'folder', '-id'], name='mail_folder_history_idx'),
+                   models.Index(fields=['slot', 'folder', 'read'], name='mail_unread_idx')]
         constraints = [models.UniqueConstraint(fields=['slot', 'request_id'], name='unique_mail_send_request')]

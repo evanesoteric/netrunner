@@ -63,7 +63,21 @@ def complete(slot, attachment_ids):
             raise GameError('Broker rejected delivery: attach the recovered objective file from your local drive.')
         if local.get('encrypted'):
             raise GameError('Broker rejected delivery: archive is encrypted. Decrypt the local copy with Rosetta first.')
-        if local['source'] != job['target'] or local['source_path'] != job['file']:
+        receipt = state.get('recovery_receipt')
+        if receipt:
+            matches = all(local.get(key) == receipt.get(key) for key in ('id', 'source', 'source_path', 'revision'))
+        else:
+            # Older saves have no explicit receipt. The persistent artifact keeps
+            # its original identity when maintenance moves it into an archive.
+            server = ensure_server(slot, job)
+            artifact = server.files[0] if server.files else {}
+            original = artifact.get('original')
+            paths = [job['file'], original]
+            revision = local.get('revision')
+            if original and type(revision) is int and 1 < revision <= server.revision:
+                paths.append(f'archive/r{revision}/{original.lstrip("/")}')
+            matches = local.get('source_path') in paths
+        if local['source'] != job['target'] or not matches:
             raise GameError('Broker rejected delivery: file provenance does not match this assignment.')
     if job.get('delete_paths'):
         from .deletion import missing_deletions
@@ -71,6 +85,10 @@ def complete(slot, attachment_ids):
         missing = missing_deletions(job, server.files, state.get('deletion_receipts', []))
         if missing:
             raise GameError('Broker rejected delivery: deletion proof missing for required copies:\n' + '\n'.join('/' + path for path in missing))
+    elif job['objective'] == 'delete':
+        server = ensure_server(slot, job)
+        if any(entry['name'] == job['file'] and entry['present'] for entry in server.files):
+            raise GameError('Broker rejected delivery: target file is present again. Revisit the server and delete the current copy.')
     fulfilled = (state.get('recovered') and local) if job['objective'] == 'retrieve' else state.get('deleted')
     if not fulfilled or not state.get('clean_exit'):
         raise GameError('Broker rejected delivery: objective or clean exit evidence missing.')

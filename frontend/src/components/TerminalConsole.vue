@@ -9,6 +9,7 @@ const cleaners = computed(() => props.slot.catalog.filter(item => item.kind === 
 watch(cleaners, items => { if (!items.some(item => item.id === cleaner.value)) cleaner.value = items.find(item => item.id === props.slot.applet_preferences?.cleaner)?.id || items[0]?.id || '' }, { immediate: true })
 watch(() => props.slot.applet_preferences?.cleaner, selected => { if (cleaners.value.some(item => item.id === selected)) cleaner.value = selected })
 const input = ref(null), output = ref(null), value = ref(''), histories = ref({}), historyIndex = ref(-1)
+const recalledDraft = ref('')
 const entries = computed(() => props.slot.mission_log.filter(line => line.app === props.application))
 const name = computed(() => props.slot.running_apps.find(app => app.id === props.application)?.name || (props.application === 'bank' ? 'Cipher bank' : props.application))
 const inputId = computed(() => `console-command-${props.application}${props.embedded ? '-workspace' : ''}`)
@@ -57,9 +58,11 @@ async function submit() {
   if (props.busy || !value.value.trim()) return
   resetCompletion()
   const raw = value.value
-  if (props.application === 'terminal' && ['lockpick', 'login'].includes(raw.trim().toLowerCase())) { value.value = ''; emit('open-cracker'); return }
   const history = histories.value[props.application] ||= []
-  history.push(raw); historyIndex.value = history.length
+  if (history.at(-1) !== raw) history.push(raw)
+  if (history.length > 200) history.splice(0, history.length - 200)
+  historyIndex.value = history.length; recalledDraft.value = ''
+  if (props.application === 'terminal' && ['lockpick', 'login'].includes(raw.trim().toLowerCase())) { value.value = ''; emit('open-cracker'); return }
   try {
     if (await props.send(raw, props.application)) value.value = ''
   } finally {
@@ -78,9 +81,12 @@ async function clean() {
 function recall(delta) {
   resetCompletion()
   const history = histories.value[props.application] || []
+  if (!history.length) return
+  if (historyIndex.value >= history.length) recalledDraft.value = value.value
   historyIndex.value = Math.max(0, Math.min(history.length, historyIndex.value + delta))
-  value.value = history[historyIndex.value] || ''
+  value.value = historyIndex.value === history.length ? recalledDraft.value : history[historyIndex.value]
 }
+function edited() { resetCompletion(); historyIndex.value = (histories.value[props.application] || []).length }
 function focusOutput() {
   // Selecting/copying output and keyboard navigation remain available.
   if (window.getSelection()?.isCollapsed !== false) focus()
@@ -94,7 +100,7 @@ onMounted(async () => { resetCompletion(); await scroll(true); if (props.autofoc
   <section class="panel terminal-panel">
     <div class="panel-title"><span><Terminal :size="16" /> {{ name.toUpperCase() }}</span><span class="panel-meta">{{ application === 'bank' ? 'CIPHER PRIVATE ACCOUNT' : slot.connected ? 'REMOTE LINK ACTIVE' : application === 'terminal' ? `LOCAL DRIVE ${slot.storage_used} / ${slot.equipment.storage.capacity} MB` : 'LOCAL SESSION' }}</span></div>
     <div ref="output" class="terminal-log" role="log" :aria-label="`${application} output`" @pointerup="focusOutput" @scroll="trackScroll">
-      <div class="terminal-banner">NETRUNNER / {{ application.toUpperCase() }} [v0.21]<br>{{ application === 'terminal' ? (slot.authenticated ? `${slot.remote_name} / admin@${slot.remote_ip || slot.remote_target}.` : 'Local shell ready. Owned software applets run here. Type applets to list them.') : 'Application process ready.' }} Type help for its reference manual.<br>─────────────────────────────────────────────────────</div>
+      <div class="terminal-banner">NETRUNNER / {{ application.toUpperCase() }} [v0.22]<br>{{ application === 'terminal' ? (slot.authenticated ? `${slot.remote_name} / admin@${slot.remote_ip || slot.remote_target}.` : 'Local shell ready. Owned software applets run here. Type applets to list them.') : 'Application process ready.' }} Type help for its reference manual.<br>─────────────────────────────────────────────────────</div>
       <pre v-for="(entry, i) in entries" :key="i">{{ entry.text }}</pre>
       <span v-if="busy" class="terminal-muted" role="status">PROCESSING…</span>
     </div>
@@ -103,7 +109,7 @@ onMounted(async () => { resetCompletion(); await scroll(true); if (props.autofoc
     <div v-if="application === 'terminal' && cleaners.length" class="terminal-extensions"><label :for="`${inputId}-cleaner`">LOGCLEANER</label><select :id="`${inputId}-cleaner`" v-model="cleaner" aria-label="Logcleaner license" :disabled="busy"><option v-for="tool in cleaners" :key="tool.id" :value="tool.id">{{ tool.name }}</option></select><button class="text-link" :disabled="busy || !slot.authenticated" @click="clean">Clean logs</button></div>
     <form class="command-line" @submit.prevent="submit">
       <label :for="inputId">{{ application === 'terminal' && slot.authenticated ? `admin@${slot.remote_ip || slot.remote_target}` : `${slot.alias}@${application}` }}:{{ application === 'terminal' && slot.authenticated ? slot.remote_cwd || '/' : '~' }}$</label>
-      <input :id="inputId" ref="input" v-model="value" :aria-label="embedded ? `${name} command` : 'Terminal command'" placeholder="" autocomplete="off" aria-autocomplete="list" :aria-describedby="`${inputId}-hint`" spellcheck="false" maxlength="160" :readonly="busy" :aria-busy="busy" @input="resetCompletion" @keydown.tab="complete" @keydown.esc="resetCompletion" @keydown.up.prevent="recall(-1)" @keydown.down.prevent="recall(1)" />
+      <input :id="inputId" ref="input" v-model="value" :aria-label="embedded ? `${name} command` : 'Terminal command'" placeholder="" autocomplete="off" aria-autocomplete="list" :aria-describedby="`${inputId}-hint`" spellcheck="false" maxlength="160" :readonly="busy" :aria-busy="busy" @input="edited" @keydown.tab="complete" @keydown.esc="resetCompletion" @keydown.up.prevent="recall(-1)" @keydown.down.prevent="recall(1)" />
       <button class="icon-button" :disabled="busy || !value.trim()" aria-label="Execute command"><ArrowRight :size="18" /></button>
     </form>
     <span :id="`${inputId}-hint`" class="terminal-keyboard-hint">Tab completes · Shift+Tab moves focus</span>

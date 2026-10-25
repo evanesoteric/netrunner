@@ -1,6 +1,7 @@
 """Fictional local mail only. No SMTP, network delivery or host-file uploads."""
 from uuid import UUID, uuid4
 from django.utils import timezone
+from django.db.models import Q
 from .models import MailMessage, EnforcementCase
 from .mechanics import GameError
 
@@ -72,7 +73,8 @@ def pay_case(slot, reference, recipient, amount):
 def serialize(message):
     return dict(id=message.pk, folder=message.folder, sender=message.sender, recipient=message.recipient,
                 subject=message.subject, body=message.body, kind=message.kind, read=message.read,
-                assignment_id=message.assignment_id, case_id=message.case_id, reply_to=message.reply_to_id,
+                assignment_id=message.assignment_id, assignment_status=message.assignment.status if message.assignment_id else None,
+                case_id=message.case_id, case_status=message.case.status if message.case_id else None, reply_to=message.reply_to_id,
                 attachments=message.attachments, created_at=message.created_at)
 
 
@@ -97,7 +99,7 @@ def send(slot, data):
     reply = data.get('reply_to')
     if reply is not None and type(reply) is not int:
         raise GameError('Choose a valid message to reply to.')
-    parent = slot.mail.filter(pk=reply, folder='inbox').first() if reply else None
+    parent = slot.mail.select_related('assignment', 'case').filter(pk=reply, folder='inbox').first() if reply else None
     if reply and not parent:
         raise GameError('Reply message not found in this save.')
     ids = data.get('attachments', [])
@@ -163,3 +165,31 @@ def terminal_submit(slot):
     return send(slot, dict(request_id=str(uuid4()), recipient=BROKER, subject='Re: ' + parent.subject[:176],
                            body='Contract work complete. Please verify the attached evidence.', intent='deliver', reply_to=parent.pk,
                            attachments=[file_id] if any(entry['id'] == file_id for entry in slot.local_files) else []))
+
+
+def filtered_messages(slot, params):
+    folder = params.get('folder', 'inbox')
+    category = params.get('category', 'all')
+    text = params.get('q', '')
+    unread = params.get('unread', '0')
+    if folder not in ('inbox', 'sent') or category not in ('all', 'contracts', 'agency', 'receipts', 'personal'):
+        raise GameError('Choose a valid mail folder and category.')
+    if not isinstance(text, str) or len(text) > 120 or '\x00' in text:
+        raise GameError('Mail search must contain at most 120 characters.')
+    if unread not in ('0', '1'):
+        raise GameError('Unread filter must be 0 or 1.')
+    query = slot.mail.filter(folder=folder)
+    if category == 'contracts':
+        query = query.filter(assignment__isnull=False)
+    elif category == 'agency':
+        query = query.filter(case__isnull=False).exclude(kind='bank_receipt')
+    elif category == 'receipts':
+        query = query.filter(kind='bank_receipt')
+    elif category == 'personal':
+        query = query.filter(assignment__isnull=True, case__isnull=True)
+    if unread == '1':
+        query = query.filter(read=False)
+    if text.strip():
+        term = text.strip()
+        query = query.filter(Q(subject__icontains=term) | Q(body__icontains=term) | Q(sender__icontains=term) | Q(recipient__icontains=term))
+    return query

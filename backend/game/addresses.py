@@ -38,11 +38,18 @@ def allocated_ip(index):
     return f'10.{index // (254 * 256)}.{index // 254 % 256}.{index % 254 + 1}'
 
 
-@transaction.atomic
 def ip_for(host):
     cache = _cache.get()
     if cache is not None and host in cache:
         return cache[host]
+    value = _allocate_address(host)
+    if cache is not None:
+        cache[host] = value
+    return value
+
+
+@transaction.atomic
+def _allocate_address(host):
     entry = NetworkAddress.objects.filter(host=host).first()
     if entry is None or entry.ip is None:
         # Serialize new allocations across the owning transaction. Requests may
@@ -53,8 +60,6 @@ def ip_for(host):
         if entry.ip is None:
             entry.ip = allocated_ip(entry.pk)
             entry.save(update_fields=['ip'])
-    if cache is not None:
-        cache[host] = entry.ip
     return entry.ip
 
 

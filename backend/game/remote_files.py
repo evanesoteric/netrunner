@@ -60,7 +60,9 @@ def command(slot, verb, args, target):
         server.save()
         record_action(slot, actual, 'file_retrieved', f'{entry["name"]} copied to local storage.')
         if primary:
-            state.update(recovered=True, local_file_id=local['id'])
+            state.update(recovered=True, local_file_id=local['id'], recovery_receipt={
+                key: local[key] for key in ('id', 'source', 'source_path', 'revision')
+            })
         state.update(dirty=True, work=state.get('work', 0) + math.ceil(entry['size'] / hardware(slot)['gateway']['bandwidth'] + state.get('latency', 0) / 10))
         return f'Copied {entry["name"]} to local storage. {entry["size"]} MB verified.\nLocal file: {local["name"]} ({"encrypted" if local["encrypted"] else "readable"}) / drive usage {storage_used(slot)} MB.'
     if verb == 'rm':

@@ -42,6 +42,7 @@ def local_filesystem(slot, verb, args):
         slot.mission_state.update(recovered=False)
         slot.mission_state.pop('local_file_id', None)
         slot.mission_state.pop('local_size', None)
+        slot.mission_state.pop('recovery_receipt', None)
     return f'{entry["name"]} removed from local storage. Reclaimed {entry["size"]} MB.'
 
 
@@ -506,11 +507,11 @@ def _shell(slot, verb, args, job):
         return run_exploit(slot, args[0])
     arity = {'history': 0, 'jump': 1, 'rumors': 0, 'apps': 0, 'contracts': 0, 'accept': 1, 'route': 0, 'status': 0, 'brief': 0, 'abort': 0, 'connect': 1, 'submit': 0, 'disconnect': 0, 'ls': 0, 'get': 1, 'rm': 1}
     if verb == 'assignments' and not args:
-        from .contracts import public_code
         return '\n'.join(f'{public_code(entry.key, slot)} / {entry.descriptor["title"]}' for entry in slot.assignments.filter(status='accepted')) or 'No accepted assignments.'
     if verb == 'select' and len(args) == 1:
         from .assignments import focus
-        entry = next((entry for entry in slot.assignments.filter(status='accepted') if str(codes(slot).get(entry.key)) == args[0]), None)
+        mapping = codes(slot)
+        entry = next((entry for entry in slot.assignments.filter(status='accepted') if str(mapping.get(entry.key)) == args[0]), None)
         if not entry:
             raise GameError('Choose a numeric ID from assignments.')
         focus(slot, entry.key)

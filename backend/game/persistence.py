@@ -23,7 +23,7 @@ def event(server, kind, summary):
 def ensure_server(slot, target):
     server, created = ServerState.objects.get_or_create(slot=slot, address=target['target'], defaults={
         'descriptor': {**{key: value for key, value in target.items() if not key.startswith('_')}, 'filesystem_layout': LAYOUT_VERSION},
-        'files': initial_files(target), 'security': target['security'], 'port': target['port'],
+        'files': lambda: initial_files(target), 'security': target['security'], 'port': target['port'],
         'backdoor_installed': any(entry['target'] == target['target'] for entry in slot.backdoors),
     })
     if server.descriptor.get('filesystem_layout') != LAYOUT_VERSION:

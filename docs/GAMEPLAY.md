@@ -38,6 +38,8 @@ The server controls decoding time using CPU speed, Lockpick speed, target securi
 
 ## Trace tracker
 
+A soft, short beep accelerates as the visible trace countdown approaches zero. Audio starts after a player interaction, pauses in hidden tabs, and stops when the trace ends or you disconnect. Unresolved traces and Wraith sessions stay silent. Use the speaker button on the floating tracker to mute or enable sound; the preference is saved in this browser.
+
 A fixed floating bar keeps the target and trace status visible across pages. Before login it shows an inactive trace; Wraith links show suppressed logging. An owned, sufficiently capable Tripwire reveals the countdown and progress meter. The bar turns red at 30 seconds remaining. Without a suitable monitor, it ticks elapsed time since login and explains that remaining time needs Tripwire. The HUD sits above login modals and stays readable while the background is blurred. The countdown uses a server deadline, so it continues ticking between polls or during a temporary polling interruption.
 
 ## Integrated Logcleaner

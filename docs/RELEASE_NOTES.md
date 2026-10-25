@@ -2,6 +2,10 @@
 
 Historical feature and migration notes. See the [README](../README.md) for the current project overview and [development guide](DEVELOPMENT.md) for setup and maintenance.
 
+## v0.20.1 — trace warning audio
+
+Added a quiet, short sine-wave beep that accelerates with the visible trace countdown, plus a persistent browser-local mute control on the floating tracker. Audio requires a player gesture and pauses in background tabs. Inactive, unresolved and Wraith traces remain silent; no hidden deadline is exposed. Tones use the browser audio engine without downloads or external audio assets.
+
 ## v0.20 — Cipher Bank accounts, credit and complete statements
 
 Cipher Bank now exposes the entire ledger through snapshot-based pagination (25 entries in the page view, 15 per terminal history page). Added reserve transfers, one active fixed-fee loan per save, and partial/full repayment forms and commands. Loan terms are quoted before borrowing: 5% once, rounded up, with no compounding or automatic repayment. Transfers and credit actions record linked account entries and closing balances; retrying a form request cannot move funds twice. Current funds remain the spending balance, while fines can collect from both current and reserve. Migration 0016 preserves existing ledger rows and initializes reserve/debt fields to zero. PostgreSQL backup/restore preserves banking balances, loan terms and request references. Restart clears financial state and rejects stale requests. Investments remain deferred for separate economy design.

@@ -45,5 +45,5 @@ for index, (operator, service, address, location, x, y) in enumerate([
     PUBLIC_SERVERS.append(dict(id=f'public-{index:02}', address=f'{address}.internal', name=f'{operator}: {service}',
                                operator=operator, category='Public', location=location, short_name=operator.upper(),
                                x=x, y=y, rank=0, security=1, fee=3 + index % 6, delay=10 + index % 17,
-                               latency=4 + index % 9, exploitable=False))
+                               latency=4 + index % 9, port=3389 if index % 5 == 0 else 443 if index % 3 == 0 else 22, exploitable=False))
 PUBLIC_BY_ID = {server['id']: server for server in PUBLIC_SERVERS}

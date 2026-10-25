@@ -20,8 +20,8 @@ A small fictional scripting language or saved terminal routines could let experi
 
 Explore a narrow set of game commands first. Automation should run only through the server-authoritative game simulation, obey normal ownership, access, resource, and payout rules, and never execute host commands or contact external infrastructure. Decide how interruption, failed steps, loops, and repeated financial actions should behave before implementation.
 
-## Exploit broker — design discussion
+## Exploit market — implemented foundation, future directions
 
-Agreed direction: reusable exploit engines with consumable exploit intelligence, matched to exact service fingerprints such as `SSH / auth-v2`, rather than any server using a protocol. Keep this at the design stage.
+The first market ships in v0.14 through IRC Underground: bot traders, permanent fingerprint licenses and consumable single-use copies, matched to protocol, auth version and patch revision. Successful use grants administrator access under the existing trace and log-cleanup rules. See [gameplay](docs/GAMEPLAY.md#irc-underground-and-fingerprint-exploits).
 
-Open design decisions include how intelligence is consumed on failed attempts, whether packets bind to a host or service revision, how patches invalidate stale packets, pricing, and the distinction between an initial foothold and administrator access. Successful exploitation should fit the existing login/trace/log-cleanup rules; Wraith's persistent log-free entry remains a separate capability.
+Possible future directions: separate reusable engines from consumable intelligence packets, broker reputation, time-limited tipoffs, rare invitation-only channels, lower-privilege footholds, and pricing driven by patch scarcity. These remain ideas rather than committed work.

@@ -275,7 +275,8 @@ def trade(slot, action, product_id):
 
 
 MANUALS = {
-    'terminal': 'LOCAL SHELL\napplets — list owned terminal software\nuse <license-id> — select an applet version\ntrace — licensed Tripwire telemetry\ninstall — install owned Wraith rootkit\ndeploy <host> — deploy owned Eclipse ransomware\nhelp — application manual\nrumors — intercepted hidden-service invitation\njump <host> — use an installed Wraith backdoor\napps — running processes and RAM\ncontracts — broker listings\naccept <contract-id> — reserve by the numeric ID in contracts (0–255)\nbrief — read the accepted brief\nroute — inspect the committed proxy chain\nconnect <host> — dial a fictional target\nscan <host> — scan with owned Cartograph software\nlogcleaner [license-id] — erase remote logs with an owned Logcleaner license\nlockpick — open the server login dialog\nstatus — gateway status\nhistory — recent operator journal for this target\ndecrypt <local-file> — decrypt a local archive with owned Rosetta software while disconnected\nls — list local files when disconnected; remote files when logged in\nget <file> — copy a readable file to local storage\nrm <file> — remove a local file when disconnected; a remote file when logged in\ndisconnect — end the remote session\nsubmit — deliver evidence to the broker\nabort — abandon the contract (fine and reputation loss)\nclear — clear local console output',
+    'exploit': 'FINGERPRINT EXPLOITS\nBuy licenses or single-use copies in IRC Underground with CPH.\nexploits — list owned fingerprint tools\nexploit <id> — use on the connected, freshly scanned server\nMatch protocol, auth version and patch revision exactly. Uses 2 GB transient RAM.\nA lifetime license is reusable for that fingerprint; single-use copies burn on successful entry only.\nSuccess opens an admin shell immediately, starts a trace and leaves access logs. Clean logs before disconnecting.',
+    'terminal': 'LOCAL SHELL\nexploits — list owned fingerprint exploits\nexploit <id> — instant shell using a matching exploit from IRC Underground\napplets — list owned terminal software\nuse <license-id> — select an applet version\ntrace — licensed Tripwire telemetry\ninstall — install owned Wraith rootkit\ndeploy <host> — deploy owned Eclipse ransomware\nhelp — application manual\nrumors — intercepted hidden-service invitation\njump <host> — use an installed Wraith backdoor\napps — running processes and RAM\ncontracts — broker listings\naccept <contract-id> — reserve by the numeric ID in contracts (0–255)\nbrief — read the accepted brief\nroute — inspect the committed proxy chain\nconnect <host> — dial a fictional target\nscan <host> — scan with owned Cartograph software\nlogcleaner [license-id] — erase remote logs with an owned Logcleaner license\nlockpick — open the server login dialog\nstatus — gateway status\nhistory — recent operator journal for this target\ndecrypt <local-file> — decrypt a local archive with owned Rosetta software while disconnected\nls — list local files when disconnected; remote files when logged in\nget <file> — copy a readable file to local storage\nrm <file> — remove a local file when disconnected; a remote file when logged in\ndisconnect — end the remote session\nsubmit — deliver evidence to the broker\nabort — abandon the contract (fine and reputation loss)\nclear — clear local console output',
     'mapper': 'CARTOGRAPH\nscan <host> — inspect a fictional host and its services\nCosts 1 + tool tier CPH. Scan quality depends on tool capability.',
     'cracker': 'LOCKPICK\nUse login in the primary terminal to open the password decoder. Connect to a server login and scan its authentication service first.',
     'decryptor': 'ROSETTA\ndecrypt <file> — decode an encrypted remote archive\nRequires file access and a sufficient decryption engine.',
@@ -395,10 +396,12 @@ def scan_target(slot, address):
         raise GameError(f'Tool capability {tool["power"]} is insufficient for security class {target["security"]}. Operation failed.')
     server = ensure_server(slot, target)
     observe(server)
+    from .exploits import fingerprint, fingerprint_text
+    service = fingerprint_text(fingerprint(target))
     event(server, 'scanned', f'Service fingerprint observed: port {target["port"]}, revision {server.revision}.')
     server.save()
     state.update(scanned_revision=server.revision, scanned=True, scanned_host=target['target'])
-    return f'Host: {target["target"]}\n{target["port"]}/tcp  OPEN  auth-v{target["security"]} / patch r{target.get("server_revision", 1)}\nArchive: {target["file"] if target.get("file_present", True) else "missing"} / {target["size"]} MB / {"encrypted" if target["encrypted"] else "plaintext"}\nOther ports: filtered. Scan complete.'
+    return f'Host: {target["target"]}\n{target["port"]}/tcp  OPEN  auth-v{target["security"]} / patch r{target.get("server_revision", 1)}\nArchive: {target["file"] if target.get("file_present", True) else "missing"} / {target["size"]} MB / {"encrypted" if target["encrypted"] else "plaintext"}\nFingerprint: {service}\nOther ports: filtered. Scan complete.'
 
 
 def clean_logs(slot, license_id=None):
@@ -447,6 +450,14 @@ def decrypt_local(slot, name):
 
 
 def _shell(slot, verb, args, job):
+    if verb == 'exploits' and not args:
+        from .exploits import inventory
+        return '\n'.join(f'{item["id"]}: {item["fingerprint"]} / {"lifetime" if item["mode"] == "license" else str(item["quantity"]) + " copies"}' for item in inventory(slot)) or 'No exploits owned. Visit IRC Underground.'
+    if verb == 'exploit':
+        if len(args) != 1:
+            raise GameError('Use exploit <id>. List owned tools with exploits.')
+        from .exploits import run_exploit
+        return run_exploit(slot, args[0])
     arity = {'history': 0, 'jump': 1, 'rumors': 0, 'apps': 0, 'contracts': 0, 'accept': 1, 'route': 0, 'status': 0, 'brief': 0, 'abort': 0, 'connect': 1, 'submit': 0, 'disconnect': 0, 'ls': 0, 'get': 1, 'rm': 1}
     if verb == 'use':
         if len(args) != 1:

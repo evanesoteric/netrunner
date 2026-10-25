@@ -36,7 +36,7 @@ def get_server(key):
 def target_for_server(server):
     return {**server, 'server_id': server['id'], 'target': server['address'],
             'file': 'public-index.dat', 'size': 12, 'encrypted': False,
-            'security': server.get('security', server['rank'] + 1), 'port': 22,
+            'security': server.get('security', server['rank'] + 1), 'port': server.get('port', 22),
             'objective': 'explore'}
 
 

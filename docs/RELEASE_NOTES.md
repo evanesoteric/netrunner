@@ -2,6 +2,10 @@
 
 Historical feature and migration notes. See the [README](../README.md) for the current project overview and [development guide](DEVELOPMENT.md) for setup and maintenance.
 
+## v0.14 — IRC Underground and fingerprint exploits
+
+Added a separate IRC Underground sidebar page with persistent per-save chat, simulated bot traders, server-timed advertisements, and CPH purchases recorded in Cipher bank. Lifetime licenses and single-use copies target exact SSH, HTTP or RDP authentication fingerprints including patch revision. Scanning reveals those fingerprints; `exploits` lists owned tools, and `exploit <id>` opens an immediate admin shell on a match. Normal trace, log cleanup, RAM and contract rules still apply. Invalid attempts do not consume copies. Later server patches require new scans and matching intelligence. Public directory servers now include HTTP and RDP services alongside SSH; existing discovered server states remain intact. Migration 0012 adds inventory and chat history without resetting native saves.
+
 ## v0.13.1 — Store and clear resale controls
 
 Renamed the shopping menu to Store, added an all-owned inventory view, and made resale buttons and blocking reasons explicit. Owned software can be selected directly in Store. Starter items remain resellable; fitted components require replacement and remote connections must be closed before trading.

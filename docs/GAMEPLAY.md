@@ -107,3 +107,41 @@ All tools operate on fictional game records. No payloads are generated, no host 
 Open **Store** in the sidebar to shop with the hardware and software broker. **Owned items** lists everything you can manage or resell across categories. Owned software has **Use in terminal** to select its license; hardware uses **Fit component**. These are different actions.
 
 All owned items, including starter licenses and starter hardware, can be sold for half their purchase price while disconnected. Fitted hardware requires a replacement first. Store cards show Sell with the return value and explain blocked sales. Selling a selected applet clears that preference; an owned fallback can then be selected or chosen automatically.
+
+## IRC Underground and fingerprint exploits
+
+Open **IRC Underground** from the sidebar to join **#zero-day**. The participants are simulated bots in your save, not real IRC users. Traders advertise every 30 seconds using server time; the pinned board lets you browse their offers. Your messages, purchases and exploit stash persist in PostgreSQL. The channel stays on its own page and consumes no workstation RAM.
+
+Channel commands:
+
+```text
+/help
+/list
+/msg hexdealer buy ssh-v1-r1-shot
+/pay hexdealer 90 ssh-v1-r1-shot
+/buy ssh-v1-r1-license
+/inventory
+/balance
+```
+
+Each purchase debits the same CPH account shown in Cipher bank and creates one ledger entry. `/pay` requires the exact quoted amount and seller; it transfers funds and delivers the item together. Duplicate lifetime purchases, invalid offers and insufficient funds leave the account untouched. Single-use copies can be purchased repeatedly, up to 99 per fingerprint. Prices start at 90 CPH per single-use copy or 360 CPH per lifetime license and scale with authentication class and patch revision.
+
+Use exploits in the primary terminal:
+
+```text
+scan helix-0.internal
+connect helix-0.internal
+exploits
+exploit ssh-v1-r1-shot
+ls
+get research.dat
+logcleaner
+disconnect
+submit
+```
+
+Reserve the appropriate contract first if you plan to submit proof. You can also connect first and scan the connected server. Tab completes owned exploit IDs, and `help exploit` explains the rules.
+
+Match the **whole fingerprint**, for example `SSH / auth-v1 / patch r1`. HTTP intelligence does not work on SSH, and revision-one intelligence does not work on a patched revision-two service. A new scan after a patch reveals its current fingerprint and makes matching revision-specific intelligence available from the bots. Lifetime means reusable against that exact fingerprint across hosts, not immunity to patches.
+
+Exploit execution needs 2 GB of free RAM for the command, a current scan, and an unauthenticated remote session. Cancel a running password breaker first. A successful exploit skips password decoding and immediately opens an admin shell, starts the trace and creates access logs. Clean those logs before disconnecting. Only successful entry consumes a single-use copy; mismatch, stale scan, insufficient RAM, or an already-open shell preserves it. Exploits do not install a backdoor. Wraith remains the separate persistent, log-free return path.

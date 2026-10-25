@@ -66,7 +66,9 @@ def settle_world(slot):
         server.files = initial_files(server.descriptor)
         for artifact in server.files:
             artifact['name'] = f'archive/r{server.revision}/{artifact["original"]}'
-        server.port = (2222 if server.descriptor['port'] == 22 else 8443) if server.revision % 2 == 0 else server.descriptor['port']
+        original_port = server.descriptor['port']
+        alternate_port = 2222 if original_port == 22 else 8443 if original_port in (80, 443) else original_port
+        server.port = alternate_port if server.revision % 2 == 0 else original_port
         server.remote_logs = []
         server.maintenance_due = None
         # Keep the last observed snapshot until the player scans or lists again.

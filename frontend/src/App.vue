@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref, nextTick, onMounted, onUnmounted, watch } from 'vue'
 import { Terminal, Network, BriefcaseBusiness, Cpu, Landmark, Layers3, ArrowUpRight, ArrowRight, ChevronRight, Radio, ShieldCheck, LogOut, Plus, X, Check, Globe, Fingerprint, Activity, Grid2X2, Play, LockKeyhole, NotebookPen } from 'lucide-vue-next'
+import IrcUnderground from './components/IrcUnderground.vue'
 import WorkspaceView from './components/WorkspaceView.vue'
 import PasswordBreaker from './components/PasswordBreaker.vue'
 import ModalDialog from './components/ModalDialog.vue'
@@ -31,6 +32,7 @@ const nav = computed(() => [
   { id: 'bank', label: 'Cipher bank', icon: Landmark },
   { id: 'atlas', label: 'Atlas network', icon: Globe },
   { id: 'exchange', label: 'Store', icon: Cpu },
+  { id: 'irc', label: 'IRC Underground', icon: Radio },
   { id: 'launcher', label: 'Applications', icon: Grid2X2 },
   { id: 'notes', label: 'Field Notes', icon: NotebookPen },
   { id: 'history', label: 'Server Histories', icon: Activity },
@@ -148,6 +150,14 @@ async function closeApplication(application, stay = false, expectedSlot = null) 
     return true
   })
 }
+async function sendIrc(command, expectedSlot) {
+  if (slot.value?.id !== expectedSlot) return false
+  return act(async () => {
+    const result = await api(`slots/${expectedSlot}/irc/`, { command })
+    updateSlot(result.slot)
+    return result.irc
+  })
+}
 async function sendCommand(command, application) {
   return act(async () => { updateSlot(await api(`slots/${slot.value.id}/command/`, { command, application })); return true })
 }
@@ -216,7 +226,7 @@ onUnmounted(() => { clearInterval(clock); clearInterval(poller) })
   <div class="app-shell" :inert="loginDialog || !!buildProduct">
     <aside class="sidebar">
       <a class="brand" href="#" @click.prevent="page = 'overview'" aria-label="Netrunner home"><span class="brand-icon"><Terminal :size="23" /></span><span>netrunner<span class="brand-dot">_</span><small>INDEPENDENT NETWORK ACCESS</small></span></a>
-      <div class="workspace-label">WORKSPACE <span>V.0.13</span></div>
+      <div class="workspace-label">WORKSPACE <span>V.0.14</span></div>
       <nav aria-label="Main navigation">
         <button v-for="item in nav" :key="item.id" :aria-label="item.label" :class="['nav-item', { active: page === item.id }]" @click="navigate(item)" :disabled="!slot || busy" :aria-current="page === item.id ? 'page' : undefined"><component :is="item.icon" :size="18" /><span>{{ item.label }}</span><span v-if="item.id === 'broker' && slot" class="nav-count">{{ slot.contracts.length }}</span><span v-if="item.id === 'terminal' && slot?.active_contract" class="live-dot"></span></button>
       </nav>
@@ -262,6 +272,7 @@ onUnmounted(() => { clearInterval(clock); clearInterval(poller) })
           <AppLauncher v-else-if="page === 'launcher'" :slot="slot" :busy="busy" @launch="launchApplication" @close="closeApplication" @use="useApplet" />
           <NetworkMap v-else-if="page === 'atlas'" :slot="slot" :busy="busy" @save="saveRoute" @directory="editDirectory" />
           <ServerHistory v-else-if="page === 'history'" :key="`${slot.id}:${slot.created_at}`" :slot-id="slot.id" :api="api" :remote-target="slot.remote_target" />
+          <IrcUnderground v-else-if="page === 'irc'" :key="`${slot.id}:${slot.created_at}`" :slot="slot" :busy="busy" :api="api" :send="sendIrc" />
           <ExchangeView v-else-if="page === 'exchange'" :slot="slot" :busy="busy" @trade="trade" @use="useApplet" />
           <BrokerView v-else-if="page === 'broker'" :slot="slot" :busy="busy" :now="now" :offset="serverOffset" :ranks="ranks" @action="contractAction" />
           <template v-else-if="page === 'console' && currentProcess">

@@ -45,6 +45,7 @@ def text_field(data, key, maximum):
     return value.strip()
 
 def serialize(slot, detailed=False):
+    from .exploits import inventory
     mapping = codes(slot)
     servers = all_servers(slot)
     monitor = monitor_tool(slot)
@@ -93,6 +94,7 @@ def serialize(slot, detailed=False):
             'workspace_revision': slot.workspace_revision,
             'equipment': hardware(slot),
             'local_files': slot.local_files,
+            'exploits': inventory(slot),
             'applet_preferences': slot.applet_preferences,
             'storage_used': storage_used(slot),
             'owned_hardware': slot.owned_hardware,
@@ -117,7 +119,7 @@ def serialize(slot, detailed=False):
 @ensure_csrf_cookie
 @api(['GET'], authenticated=False)
 def session(request):
-    return JsonResponse({'user': {'username': request.user.username} if request.user.is_authenticated else None, 'currency': CURRENCY, 'ranks': RANKS, 'version': '0.13.1', 'server_time': timezone.now().isoformat()})
+    return JsonResponse({'user': {'username': request.user.username} if request.user.is_authenticated else None, 'currency': CURRENCY, 'ranks': RANKS, 'version': '0.14.0', 'server_time': timezone.now().isoformat()})
 
 @api(['POST'], authenticated=False)
 def register(request):
@@ -286,7 +288,7 @@ def restart(request, slot_id):
     if request.data.get('confirmation') != slot.alias:
         raise GameError('Type the runner alias exactly to confirm restarting this slot.')
     fresh = SaveSlot(user=request.user, alias=slot.alias, position=slot.position)
-    for field in ['balance', 'reputation', 'completed', 'equipment', 'owned_hardware', 'installed_software', 'running_apps', 'proxy_route', 'atlas_nodes', 'active_contract', 'mission_started', 'mission_state', 'local_files', 'applet_preferences', 'broker_jobs', 'broker_consumed', 'broker_pending', 'broker_codes', 'mission_log', 'contract_cooldowns', 'backdoors', 'ransomware_ops', 'remote_host', 'market_unlocked', 'field_notes', 'notes_revision', 'notes_updated_at', 'workspace_layout', 'workspace_revision']:
+    for field in ['balance', 'reputation', 'completed', 'equipment', 'owned_hardware', 'installed_software', 'running_apps', 'proxy_route', 'atlas_nodes', 'active_contract', 'mission_started', 'mission_state', 'local_files', 'exploit_inventory', 'irc_messages', 'applet_preferences', 'broker_jobs', 'broker_consumed', 'broker_pending', 'broker_codes', 'mission_log', 'contract_cooldowns', 'backdoors', 'ransomware_ops', 'remote_host', 'market_unlocked', 'field_notes', 'notes_revision', 'notes_updated_at', 'workspace_layout', 'workspace_revision']:
         setattr(slot, field, getattr(fresh, field))
     slot.created_at = timezone.now()
     slot.save()
@@ -423,3 +425,15 @@ def workspace(request, slot_id):
         slot.workspace_revision += 1
         slot.save(update_fields=['workspace_layout', 'workspace_revision'])
     return JsonResponse(workspace_data(slot))
+
+
+@api(['GET', 'POST'])
+@transaction.atomic
+def irc(request, slot_id):
+    from .exploits import channel_data, irc_command
+    slot = SaveSlot.objects.select_for_update().get(pk=slot_id, user=request.user)
+    settle(slot)
+    if request.method == 'POST':
+        irc_command(slot, text_field(request.data, 'command', 240))
+        slot.save()
+    return JsonResponse({'irc': channel_data(slot), 'slot': serialize(slot, True)})

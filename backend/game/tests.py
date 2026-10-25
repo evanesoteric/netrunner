@@ -558,6 +558,24 @@ class ConcurrentEconomyTests(APIHelpers, TransactionTestCase):
         self.assertEqual(self.slot.balance, 300 - PRODUCTS['cpu-1-specialist']['price'])
         self.assertEqual(self.slot.owned_hardware.count('cpu-1-specialist'), 1)
 
+    def test_concurrent_irc_license_purchases_only_charge_once(self):
+        outcomes = self.parallel_post('irc', {'command': '/buy ssh-v1-r1-license'})
+        self.assertCountEqual(outcomes, [200, 400])
+        self.slot.refresh_from_db()
+        self.assertEqual(self.slot.balance, 840)
+        self.assertEqual(self.slot.exploit_inventory['ssh-v1-r1-license']['quantity'], 1)
+        self.assertEqual(self.slot.ledger.count(), 1)
+
+    def test_concurrent_irc_single_use_purchases_cannot_overspend(self):
+        self.slot.balance = 90
+        self.slot.save()
+        outcomes = self.parallel_post('irc', {'command': '/pay hexdealer 90 ssh-v1-r1-shot'})
+        self.assertCountEqual(outcomes, [200, 400])
+        self.slot.refresh_from_db()
+        self.assertEqual(self.slot.balance, 0)
+        self.assertEqual(self.slot.exploit_inventory['ssh-v1-r1-shot']['quantity'], 1)
+        self.assertEqual(self.slot.ledger.count(), 1)
+
     def test_concurrent_requests_settle_ransomware_only_once(self):
         self.slot.ransomware_ops = [{'target': 'vesper-dispatch.internal', 'due_at': (timezone.now() - timedelta(seconds=1)).isoformat(), 'reward': 800}]
         self.slot.save()
@@ -1911,3 +1929,148 @@ class TerminalAppletMigrationTests(TransactionTestCase):
             self.assertEqual(saved.mission_log[0]['app'],'terminal')
         finally:
             restore=MigrationExecutor(connection);restore.migrate(restore.loader.graph.leaf_nodes())
+
+
+class IrcExploitTests(APIHelpers, TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user('irc-runner')
+        self.client.force_login(self.user)
+        self.slot = SaveSlot.objects.create(user=self.user, position=1, alias='Relay')
+        self.launch('terminal')
+
+    def irc(self, text, status=200):
+        return self.post(self.endpoint('irc'), {'command': text}, status)
+
+    def test_bot_broadcasts_follow_server_time_and_reads_do_not_charge(self):
+        from unittest.mock import patch
+        path = f'/api/{self.endpoint("irc")}/'
+        first = self.client.get(path).json()
+        self.assertTrue(any('WTS ssh-v1-r1-license' in row['text'] for row in first['irc']['messages']))
+        with patch('django.utils.timezone.now', return_value=self.slot.created_at + timedelta(seconds=65)):
+            later = self.client.get(path).json()
+            self.slot.reputation = 700
+            self.slot.save(update_fields=['reputation'])
+            changed_offers = self.client.get(path).json()
+            self.assertEqual(later['irc']['messages'], changed_offers['irc']['messages'])
+        self.assertGreater(len(later['irc']['messages']), len(first['irc']['messages']))
+        self.assertEqual(later['slot']['balance'], 1200)
+        self.assertFalse(self.slot.ledger.exists())
+        self.assertEqual([app['id'] for app in later['slot']['running_apps']], ['terminal'])
+
+    def test_chat_help_purchases_inventory_and_bank_share_persistent_state(self):
+        self.irc("I'm here, channel")
+        self.irc('/help')
+        self.irc('/msg hexdealer buy ssh-v1-r1-license')
+        self.irc('/buy ssh-v1-r1-shot')
+        data = self.irc('/pay hexdealer 90 ssh-v1-r1-shot')
+        self.assertEqual(data['slot']['balance'], 660)
+        self.assertEqual(next(item for item in data['irc']['inventory'] if item['id'] == 'ssh-v1-r1-shot')['quantity'], 2)
+        self.assertEqual(self.slot.ledger.count(), 3)
+        self.assertTrue(all(row.description.startswith('IRC trade') for row in self.slot.ledger.all()))
+        restored = self.client.get(f'/api/{self.endpoint("irc")}/').json()
+        self.assertEqual(data['irc']['inventory'], restored['irc']['inventory'])
+        self.assertTrue(any(row['nick'] == 'Relay' and row['text'] == "I'm here, channel" for row in restored['irc']['messages']))
+        self.irc('/inventory')
+        self.assertIn('660 CPH', self.irc('/balance')['irc']['messages'][-1]['text'])
+        self.assertTrue(any('ssh-v1-r1-license' in row['text'] for row in self.irc('/list')['irc']['messages']))
+
+    def test_invalid_trades_are_atomic_and_do_not_move_funds(self):
+        for command in ['/buy missing', '/pay hexdealer 1 ssh-v1-r1-shot', '/msg packetwitch buy ssh-v1-r1-shot', '/buy ssh-v2-r1-license', '/pay hexdealer -90 ssh-v1-r1-shot', '/msg']:
+            self.irc(command, 400)
+        self.slot.refresh_from_db()
+        self.assertEqual(self.slot.balance, 1200)
+        self.assertEqual(self.slot.exploit_inventory, {})
+        self.assertEqual(self.slot.irc_messages, [])
+        self.assertFalse(self.slot.ledger.exists())
+        self.irc('/buy ssh-v1-r1-license')
+        self.irc('/buy ssh-v1-r1-license', 400)
+        self.assertEqual(self.slot.ledger.count(), 1)
+
+    def test_single_use_shell_requires_matching_scan_then_logs_and_traces(self):
+        self.irc('/buy ssh-v1-r1-shot')
+        self.cmd('exploit ssh-v1-r1-shot')
+        self.scan_and_connect()
+        self.slot.refresh_from_db()
+        self.slot.mission_state['scanned'] = False
+        self.slot.save()
+        result = self.cmd('exploit ssh-v1-r1-shot')
+        self.assertIn('Scan this server first', self.log_text(result))
+        self.assertFalse(result['authenticated'])
+        self.assertEqual(result['exploits'][0]['quantity'], 1)
+        self.cmd('scan helix-0.internal')
+        result = self.cmd('exploit ssh-v1-r1-shot')
+        self.assertTrue(result['authenticated'])
+        self.assertTrue(result['trace_active'])
+        self.assertEqual(result['exploits'], [])
+        self.assertTrue(self.slot.server_states.get(address='helix-0.internal').remote_logs)
+        self.assertTrue(self.slot.server_states.get(address='helix-0.internal').events.filter(kind='exploit_shell').exists())
+        self.assertIn('research.dat', self.log_text(self.cmd('ls')))
+        self.clean_exit()
+        self.assertIsNone(self.slot.server_states.get(address='helix-0.internal').maintenance_due)
+
+    def test_lifetime_license_can_be_reused_without_another_purchase(self):
+        self.irc('/buy ssh-v1-r1-license')
+        for _ in range(2):
+            self.cmd('connect harbor-library.internal')
+            self.cmd('scan harbor-library.internal')
+            data = self.cmd('exploit ssh-v1-r1-license')
+            self.assertTrue(data['authenticated'])
+            self.assertEqual(data['exploits'][0]['quantity'], 1)
+            self.clean_exit()
+        self.assertEqual(self.slot.ledger.filter(description__startswith='IRC trade').count(), 1)
+
+    def test_protocol_and_patch_mismatch_and_low_ram_preserve_copies(self):
+        self.irc('/buy ssh-v1-r1-shot')
+        self.cmd('connect pacific-museum.internal')
+        self.cmd('scan pacific-museum.internal')
+        result = self.cmd('exploit ssh-v1-r1-shot')
+        self.assertIn('Fingerprint mismatch: target is HTTP', self.log_text(result))
+        self.assertEqual(result['exploits'][0]['quantity'], 1)
+        self.cmd('disconnect')
+        self.cmd('connect harbor-library.internal')
+        self.cmd('scan harbor-library.internal')
+        server = self.slot.server_states.get(address='harbor-library.internal')
+        server.revision = 2
+        server.port = 2222
+        server.save()
+        result = self.cmd('exploit ssh-v1-r1-shot')
+        self.assertIn('current service fingerprint', result['mission_log'][-1]['text'])
+        self.cmd('scan harbor-library.internal')
+        result = self.cmd('exploit ssh-v1-r1-shot')
+        self.assertIn('Fingerprint mismatch', result['mission_log'][-1]['text'])
+        self.assertEqual(result['exploits'][0]['quantity'], 1)
+        channel = self.client.get(f'/api/{self.endpoint("irc")}/').json()['irc']
+        self.assertTrue(any(item['id'] == 'ssh-v1-r2-shot' for item in channel['offers']))
+        self.irc('/buy ssh-v1-r2-shot')
+        from unittest.mock import patch
+        with patch('game.exploits.ram_used', return_value=12):
+            result = self.cmd('exploit ssh-v1-r2-shot')
+        self.assertIn('Insufficient free RAM', result['mission_log'][-1]['text'])
+        self.assertFalse(result['authenticated'])
+        result = self.cmd('exploit ssh-v1-r2-shot')
+        self.assertTrue(result['authenticated'])
+        self.assertEqual([item['id'] for item in result['exploits']], ['ssh-v1-r1-shot'])
+
+    def test_http_and_rdp_fingerprints_work_on_their_own_services(self):
+        for protocol, address in [('http', 'pacific-museum.internal'), ('rdp', 'summit-college.internal')]:
+            key = f'{protocol}-v1-r1-shot'
+            self.irc(f'/buy {key}')
+            self.cmd(f'connect {address}')
+            data = self.cmd(f'scan {address}')
+            self.assertIn(f'{protocol.upper()} / auth-v1 / patch r1', data['mission_log'][-1]['text'])
+            self.assertTrue(self.cmd(f'exploit {key}')['authenticated'])
+            self.clean_exit()
+
+    def test_channel_is_private_to_save_owner_and_restart_clears_stash(self):
+        other = get_user_model().objects.create_user('other-irc-runner')
+        other_slot = SaveSlot.objects.create(user=other, position=1, alias='Other')
+        self.post(f'slots/{other_slot.id}/irc', {'command': '/buy ssh-v1-r1-license'}, 404)
+        self.assertEqual(self.client.get(f'/api/slots/{other_slot.id}/irc/').status_code, 404)
+        self.irc('/buy ssh-v1-r1-shot')
+        second = SaveSlot.objects.create(user=self.user, position=2, alias='Second')
+        self.assertEqual(self.client.get(f'/api/slots/{second.id}/irc/').json()['irc']['inventory'], [])
+        data = self.post(self.endpoint('restart'), {'confirmation': 'Relay'})
+        self.assertEqual(data['exploits'], [])
+        self.slot.refresh_from_db()
+        self.assertEqual(self.slot.irc_messages, [])
+        self.assertEqual(self.slot.balance, 1200)

@@ -1,6 +1,6 @@
 // Completion only offers commands and names already available to this runner.
 const commands = {
-  terminal: ['applets', 'use', 'trace', 'install', 'deploy', 'abort', 'accept', 'apps', 'brief', 'clear', 'connect', 'contracts', 'decrypt', 'disconnect', 'get', 'help', 'history', 'jump', 'lockpick', 'logcleaner', 'login', 'ls', 'rm', 'route', 'rumors', 'scan', 'status', 'submit'],
+  terminal: ['exploit', 'exploits', 'applets', 'use', 'trace', 'install', 'deploy', 'abort', 'accept', 'apps', 'brief', 'clear', 'connect', 'contracts', 'decrypt', 'disconnect', 'get', 'help', 'history', 'jump', 'lockpick', 'logcleaner', 'login', 'ls', 'rm', 'route', 'rumors', 'scan', 'status', 'submit'],
   mapper: ['help', 'scan'], decryptor: ['decrypt', 'help'], monitor: ['help', 'trace'],
   bank: ['balance', 'help', 'history'], rootkit: ['help', 'install'], ransomware: ['deploy', 'help'],
 }
@@ -20,6 +20,7 @@ export function completion(text, cursor, app, slot) {
     if (['scan', 'connect', 'deploy'].includes(verb)) pool = [...(slot.network_directory || []).map(node => node.address), slot.active_contract?.target, slot.remote_target]
     if (verb === 'jump') pool = (slot.backdoors || []).map(node => node.target)
     if (verb === 'accept') pool = (slot.contracts || []).map(job => String(job.id))
+    if (verb === 'exploit') pool = (slot.exploits || []).map(item => item.id)
     if (verb === 'use') pool = slot.installed_software || []
     if (verb === 'logcleaner') pool = (slot.installed_software || []).filter(id => id.startsWith('cleaner-'))
     if (['get', 'rm', 'decrypt'].includes(verb)) {

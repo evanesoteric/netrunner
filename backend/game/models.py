@@ -41,6 +41,7 @@ class SaveSlot(models.Model):
     applet_preferences = models.JSONField(default=dict)
     exploit_inventory = models.JSONField(default=dict)
     irc_messages = models.JSONField(default=list)
+    irc_state = models.JSONField(default=dict)
     local_files = models.JSONField(default=list)
     mission_state = models.JSONField(default=dict)
     contract_cooldowns = models.JSONField(default=dict)

@@ -110,7 +110,7 @@ All owned items, including starter licenses and starter hardware, can be sold fo
 
 ## IRC Underground and fingerprint exploits
 
-Open **IRC Underground** from the sidebar to join **#zero-day**. The participants are simulated bots in your save, not real IRC users. Traders advertise every 30 seconds using server time; the pinned board lets you browse their offers. Your messages, purchases and exploit stash persist in PostgreSQL. The channel stays on its own page and consumes no workstation RAM.
+Open **IRC Underground** from the sidebar to join **#zero-day**. The participants are simulated bots in your save, not real IRC users. More than 60 simulated regulars discuss Linux, programming, hardware and underground rumors. Chatter arrives every 10 seconds, with red exploit drops every 30 seconds using server time; the pinned board lets you browse trader offers. Expand the online roster to see the channel members. Messages, purchases and your exploit stash persist in PostgreSQL. The channel stays on its own page and consumes no workstation RAM.
 
 Channel commands:
 
@@ -122,6 +122,7 @@ Channel commands:
 /buy ssh-v1-r1-license
 /inventory
 /balance
+/clear
 ```
 
 Each purchase debits the same CPH account shown in Cipher bank and creates one ledger entry. `/pay` requires the exact quoted amount and seller; it transfers funds and delivers the item together. Duplicate lifetime purchases, invalid offers and insufficient funds leave the account untouched. Single-use copies can be purchased repeatedly, up to 99 per fingerprint. Prices start at 90 CPH per single-use copy or 360 CPH per lifetime license and scale with authentication class and patch revision.
@@ -145,3 +146,10 @@ Reserve the appropriate contract first if you plan to submit proof. You can also
 Match the **whole fingerprint**, for example `SSH / auth-v1 / patch r1`. HTTP intelligence does not work on SSH, and revision-one intelligence does not work on a patched revision-two service. A new scan after a patch reveals its current fingerprint and makes matching revision-specific intelligence available from the bots. Lifetime means reusable against that exact fingerprint across hosts, not immunity to patches.
 
 Exploit execution needs 2 GB of free RAM for the command, a current scan, and an unauthenticated remote session. Cancel a running password breaker first. A successful exploit skips password decoding and immediately opens an admin shell, starts the trace and creates access logs. Clean those logs before disconnecting. Only successful entry consumes a single-use copy; mismatch, stale scan, insufficient RAM, or an already-open shell preserves it. Exploits do not install a backdoor. Wraith remains the separate persistent, log-free return path.
+
+
+### Busy channels without runtime AI
+
+Ambient conversations use the local [`irc_chatter.json`](../backend/game/data/irc_chatter.json) library: 62 nicknames, 48 authored three-person conversations, and 12 conversation templates with software, platform, project, editor, reaction and outcome pools. Deterministic shuffling spreads topics across a cycle; shared template values keep each three-line exchange coherent. No model, external chat server, news API or background worker is needed. Add conversations or expand the vocabulary pools in that file, then restart Django to load changes.
+
+Both the saved transcript and the browser's message list are capped at **200 messages**, dropping the oldest automatically. `/clear` (also a channel button) clears saved chat for the current save across sessions. Inventory and bank history remain intact. Separate delivery cursors prevent cleared or pruned messages from replaying. The initial view includes a short recent conversation history; after an absence, catch-up is limited to six chatter messages and four exploit advertisements. Client polling allows only one refresh request at a time and stops when the page closes.

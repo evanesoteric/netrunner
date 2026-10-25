@@ -2,6 +2,10 @@
 
 Historical feature and migration notes. See the [README](../README.md) for the current project overview and [development guide](DEVELOPMENT.md) for setup and maintenance.
 
+## v0.15 — populated IRC and bounded scrollback
+
+IRC Underground now has more than 60 ambient regulars, coherent three-person conversations every 10 seconds, an expandable roster, and red exploit drops every 30 seconds. A small local JSON library combines authored threads and vocabulary templates without runtime AI or external services. Saved and displayed scrollback are capped at 200 messages. `/clear` removes chat without affecting purchases or bank history; durable delivery cursors prevent cleared or pruned messages from replaying. Offline catch-up and overlapping client polls are bounded. Migration 0013 adds per-save channel cursors while retaining existing chat and exploit ownership.
+
 ## v0.14 — IRC Underground and fingerprint exploits
 
 Added a separate IRC Underground sidebar page with persistent per-save chat, simulated bot traders, server-timed advertisements, and CPH purchases recorded in Cipher bank. Lifetime licenses and single-use copies target exact SSH, HTTP or RDP authentication fingerprints including patch revision. Scanning reveals those fingerprints; `exploits` lists owned tools, and `exploit <id>` opens an immediate admin shell on a match. Normal trace, log cleanup, RAM and contract rules still apply. Invalid attempts do not consume copies. Later server patches require new scans and matching intelligence. Public directory servers now include HTTP and RDP services alongside SSH; existing discovered server states remain intact. Migration 0012 adds inventory and chat history without resetting native saves.

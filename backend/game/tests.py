@@ -1945,7 +1945,7 @@ class IrcExploitTests(APIHelpers, TestCase):
         from unittest.mock import patch
         path = f'/api/{self.endpoint("irc")}/'
         first = self.client.get(path).json()
-        self.assertTrue(any('WTS ssh-v1-r1-license' in row['text'] for row in first['irc']['messages']))
+        self.assertTrue(any('EXPLOIT DROP | ssh-v1-r1-license' in row['text'] for row in first['irc']['messages']))
         with patch('django.utils.timezone.now', return_value=self.slot.created_at + timedelta(seconds=65)):
             later = self.client.get(path).json()
             self.slot.reputation = 700
@@ -2074,3 +2074,89 @@ class IrcExploitTests(APIHelpers, TestCase):
         self.slot.refresh_from_db()
         self.assertEqual(self.slot.irc_messages, [])
         self.assertEqual(self.slot.balance, 1200)
+
+    def test_ambient_chatter_has_a_large_valid_local_library_and_coherent_threads(self):
+        from .irc_chatter import content, ambient_message
+        from string import Formatter
+        data = content()
+        self.assertGreaterEqual(len(set(data['members'])), 60)
+        self.assertEqual(len(set(data['members'])), len(data['members']))
+        self.assertGreaterEqual(len(data['threads']), 40)
+        for thread in data['threads'] + data['templates']:
+            self.assertEqual(len(thread), 3)
+            self.assertTrue(all(isinstance(line, str) and line for line in thread))
+        for thread in data['templates']:
+            for line in thread:
+                for _, field, _, _ in Formatter().parse(line):
+                    if field:
+                        self.assertIn(field, data['pools'])
+        messages = [ambient_message(self.slot, index) for index in range(600)]
+        self.assertGreater(len({message['text'] for message in messages}), 250)
+        self.assertGreater(len({message['nick'] for message in messages}), 50)
+        self.assertEqual(messages[13], ambient_message(self.slot, 13))
+        for index in range(0, 600, 3):
+            self.assertEqual(len({message['nick'] for message in messages[index:index+3]}), 3)
+
+    def test_chat_arrives_every_ten_seconds_with_bounded_offline_catchup(self):
+        from unittest.mock import patch
+        path = f'/api/{self.endpoint("irc")}/'
+        def read(seconds):
+            with patch('django.utils.timezone.now', return_value=self.slot.created_at + timedelta(seconds=seconds)):
+                return self.client.get(path).json()['irc']
+        first = read(0)
+        self.assertGreaterEqual(len(first['messages']), 24)
+        self.assertGreaterEqual(len(first['members']), 65)
+        self.assertEqual(first['messages'], read(9)['messages'])
+        ten = read(10)
+        self.assertEqual(len(ten['messages']), len(first['messages']) + 1)
+        self.assertEqual(ten['messages'], read(19)['messages'])
+        twenty = read(20)
+        self.assertEqual(len(twenty['messages']), len(ten['messages']) + 1)
+        thirty = read(30)
+        self.assertEqual(len(thirty['messages']), len(twenty['messages']) + 2)
+        drops = [row for row in thirty['messages'] if row.get('kind') == 'drop']
+        self.assertEqual(len(drops), 2)
+        days_later = read(5 * 24 * 60 * 60)
+        self.assertLessEqual(len(days_later['messages']) - len(thirty['messages']), 10)
+        self.assertEqual(days_later['messages'], read(5 * 24 * 60 * 60)['messages'])
+        self.slot.refresh_from_db()
+        self.assertEqual(self.slot.balance, 1200)
+        self.assertFalse(self.slot.ledger.exists())
+
+    def test_scroll_cap_and_clear_preserve_stash_bank_and_delivery_cursor(self):
+        from .exploits import add_message, SCROLLBACK_LIMIT
+        from unittest.mock import patch
+        self.irc('/buy ssh-v1-r1-license')
+        self.slot.refresh_from_db()
+        for index in range(800):
+            add_message(self.slot, 'Relay', f'old chat {index}')
+        self.slot.save()
+        data = self.client.get(f'/api/{self.endpoint("irc")}/').json()['irc']
+        self.assertLessEqual(len(data['messages']), SCROLLBACK_LIMIT)
+        self.assertFalse(any('old chat 0' == message['text'] for message in data['messages']))
+        self.slot.refresh_from_db()
+        self.assertEqual(len(self.slot.irc_messages), SCROLLBACK_LIMIT)
+        with patch('django.utils.timezone.now', return_value=self.slot.created_at + timedelta(seconds=300)):
+            cleared = self.irc('/clear')
+            reloaded = self.client.get(f'/api/{self.endpoint("irc")}/').json()
+        self.assertEqual(cleared['irc']['messages'], reloaded['irc']['messages'])
+        self.assertEqual(len(reloaded['irc']['messages']), 2)
+        self.assertIn('Scrollback cleared', reloaded['irc']['messages'][-1]['text'])
+        self.assertEqual(reloaded['slot']['balance'], 840)
+        self.assertEqual(reloaded['irc']['inventory'][0]['id'], 'ssh-v1-r1-license')
+        self.assertEqual(self.slot.ledger.count(), 1)
+        with patch('django.utils.timezone.now', return_value=self.slot.created_at + timedelta(seconds=310)):
+            next_tick = self.client.get(f'/api/{self.endpoint("irc")}/').json()['irc']
+        self.assertEqual(len(next_tick['messages']), 3)
+        self.assertEqual(next_tick['messages'][-1]['kind'], 'chat')
+
+    def test_legacy_broadcast_cursor_is_preserved_when_chatter_is_added(self):
+        from unittest.mock import patch
+        self.slot.irc_messages = [dict(at=self.slot.created_at.isoformat(), nick='hexdealer', text='old exploit advert', tick=0)]
+        self.slot.save()
+        with patch('django.utils.timezone.now', return_value=self.slot.created_at + timedelta(seconds=20)):
+            data = self.client.get(f'/api/{self.endpoint("irc")}/').json()['irc']
+        self.assertEqual(sum(row['text'] == 'old exploit advert' for row in data['messages']), 1)
+        self.assertFalse(any(row.get('kind') == 'drop' for row in data['messages']))
+        self.slot.refresh_from_db()
+        self.assertEqual(self.slot.irc_state, dict(chat_tick=2, trade_tick=0))

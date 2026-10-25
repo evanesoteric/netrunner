@@ -63,7 +63,7 @@ Stop with **Ctrl+C**, then `docker compose down`. Start again with `docker compo
 - **Proxy routing:** discover dozens of public-access proxies and chain named servers on Atlas to buy trace time, balancing connection costs and latency.
 - **Custom rigs:** choose hardware and individual software licenses; manage working RAM, local storage, and applet capabilities.
 - **Contracts and rank:** rise from Ghost to Architect. Jobs are available at your rank, one above, and one below. Failed contracts carry financial and reputation penalties.
-- **IRC Underground:** trade with channel bots for lifetime or single-use exploits matched to exact service fingerprints.
+- **IRC Underground:** join a busy simulated Linux-style channel and trade CPH for lifetime or single-use fingerprint exploits.
 - **Cipher economy:** earn and spend fictional cryptocurrency (CPH), manage a bank account, and trade equipment.
 - **Persistent worlds:** each save has its own local files, server state, visit history, notes, and saved workspace arrangement.
 - **Hidden discoveries:** uncover the Null Exchange, epic software, backdoors, and ransomware opportunities.

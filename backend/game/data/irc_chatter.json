@@ -1,0 +1,502 @@
+{
+  "members": [
+    "relayrat",
+    "tuxbyte",
+    "penguinista",
+    "kernelpanic",
+    "rootbeer",
+    "nullpointer",
+    "bitrot",
+    "bashful",
+    "daemonette",
+    "swapfiend",
+    "initzero",
+    "xtermkid",
+    "lintqueen",
+    "patchpilot",
+    "compilecat",
+    "coffeeoverflow",
+    "vimwitch",
+    "emacsmonk",
+    "screenmage",
+    "tmuxfox",
+    "debianite",
+    "gentoojoe",
+    "archangel",
+    "slackwarez",
+    "bsdghost",
+    "portknocker",
+    "segfault",
+    "packetmoth",
+    "hexeditor",
+    "sysopette",
+    "nocturne",
+    "cablegoblin",
+    "udevil",
+    "sudo_sue",
+    "greppunk",
+    "awkward",
+    "sedna",
+    "perlpoet",
+    "pyromancer",
+    "phpnomad",
+    "rubyrogue",
+    "rustbucket",
+    "golangirl",
+    "sqlsorcerer",
+    "cachemiss",
+    "diskjockey",
+    "raidshadow",
+    "uptimekid",
+    "localhost",
+    "nfswitch",
+    "dnsgnome",
+    "pingpong",
+    "croncritter",
+    "makeworld",
+    "kbuild",
+    "fancontrol",
+    "floppyfox",
+    "irssi_owl",
+    "weechatbat",
+    "lynxlover",
+    "manpage",
+    "motd_404"
+  ],
+  "threads": [
+    [
+      "Wow, new Django update. This is a major improvement for my business.",
+      "did you try it against a copy of production first?",
+      "yes, staging finally paid for itself. the migration was boring. beautiful."
+    ],
+    [
+      "PHP2Shell vulnerability just leaked; exploit in the works.",
+      "rumor or a working fingerprint match?",
+      "rumor for now. don't buy a packet off a screenshot."
+    ],
+    [
+      "GitHub is loaded with new Python libraries today, loving this.",
+      "my bookmarks grow faster than my free time",
+      "same. i maintain a requirements file for projects i haven't started."
+    ],
+    [
+      "Deploying a new LEMP stack. Apache is dead to me, but I see the appeal of LiteSpeed.",
+      "your next post will be about moving everything back",
+      "only if the config files apologize first."
+    ],
+    [
+      "Dropping a new exploit soon; SSH v2 is doomed!",
+      "which auth version and patch revision?",
+      "still testing. actual packets go through the traders, not my hype department."
+    ],
+    [
+      "just got sound working on the old laptop",
+      "what was wrong with it?",
+      "muted mixer. three hours. nobody speak to me."
+    ],
+    [
+      "gentoo compile started before dinner",
+      "what did you have?",
+      "breakfast, apparently."
+    ],
+    [
+      "anyone else still living inside screen?",
+      "screen inside ssh inside screen",
+      "that's not a workflow, that's a nesting doll."
+    ],
+    [
+      "finally convinced the office to try Linux",
+      "how did the printer take it?",
+      "personally."
+    ],
+    [
+      "my uptime was 200 days until someone found the power strip",
+      "a moment of silence for the counter",
+      "it was me. i wanted to plug in a kettle."
+    ],
+    [
+      "vim question: how do i leave",
+      ":q unless you've changed things",
+      "too late, i've become a maintainer."
+    ],
+    [
+      "i installed emacs for an editor",
+      "and how is the operating system?",
+      "great. still looking for the editor."
+    ],
+    [
+      "my backup script has been running flawlessly for months",
+      "you tested a restore, right?",
+      "brb, suddenly busy."
+    ],
+    [
+      "bought a secondhand ThinkPad. the keyboard has seen things.",
+      "does the red nub still work?",
+      "yes. it has more uptime than my server."
+    ],
+    [
+      "trying a tiling window manager tonight",
+      "how many terminals so far?",
+      "nine. still only doing one thing."
+    ],
+    [
+      "why is my web app slow",
+      "did you count the database queries?",
+      "i stopped at 400 and made tea."
+    ],
+    [
+      "found a bug in my shell script",
+      "quoting?",
+      "quoting. it's always quoting."
+    ],
+    [
+      "DNS finally propagated",
+      "was it actually DNS?",
+      "this time yes. i am as surprised as you are."
+    ],
+    [
+      "the server is down and the monitoring server says everything is fine",
+      "where is the monitoring server?",
+      "on the server. i see the problem."
+    ],
+    [
+      "put my dotfiles in git",
+      "including the weird aliases?",
+      "especially the weird aliases. future archaeologists deserve context."
+    ],
+    [
+      "new mechanical keyboard arrived",
+      "what switches?",
+      "the kind that get you banned from voice chat."
+    ],
+    [
+      "i miss forums with signatures bigger than the posts",
+      "and a little penguin saying what kernel you ran",
+      "mine also announced my RAM. all 256 megabytes of it."
+    ],
+    [
+      "irc over dialup had a certain atmosphere",
+      "that atmosphere was your modem negotiating",
+      "and everyone typing 'wb' when your connection came back."
+    ],
+    [
+      "built an entire weekend project in Python",
+      "what does it do?",
+      "organizes the directories containing my unfinished weekend projects."
+    ],
+    [
+      "the staging database is suspiciously empty",
+      "did you point the app at the right environment?",
+      "yes. the right environment was not impressed with my import script."
+    ],
+    [
+      "someone named the production host testbox",
+      "bold disaster recovery strategy",
+      "the actual test box is called do-not-touch."
+    ],
+    [
+      "finished reading the manual",
+      "all of it?",
+      "no. the part explaining where the rest of the manual is."
+    ],
+    [
+      "my laptop fan sounds like a small aircraft",
+      "compiling a kernel?",
+      "opening the company dashboard."
+    ],
+    [
+      "any good music for late-night maintenance?",
+      "ambient, no lyrics, no sudden alarms",
+      "so not the RAID controller's latest album."
+    ],
+    [
+      "got my first clean contract delivery",
+      "nice. remember to clear your local copies when the disk fills",
+      "already made a field note. not learning that one the hard way."
+    ],
+    [
+      "bought a lifetime exploit license",
+      "for which fingerprint?",
+      "exactly. i now understand why the trader asked that question twice."
+    ],
+    [
+      "the target got patched while i was offline",
+      "new scan, new intelligence",
+      "old license still works on the other hosts. lesson learned."
+    ],
+    [
+      "anyone keeping old underground zines?",
+      "box full of them. half the addresses are dead.",
+      "half is an excellent success rate around here."
+    ],
+    [
+      "switched my home server to BSD",
+      "how's it going?",
+      "quiet. suspiciously quiet. i keep checking if it's on."
+    ],
+    [
+      "my package manager wants to remove 80 packages",
+      "read the transaction summary before you say yes",
+      "for once i am reading every word."
+    ],
+    [
+      "tried a new color scheme",
+      "green on black?",
+      "green on slightly different black. radical stuff."
+    ],
+    [
+      "running a LAN party this weekend",
+      "will the network be ready?",
+      "the games are ready. the network is an ongoing philosophical discussion."
+    ],
+    [
+      "just replaced a dying disk",
+      "did SMART warn you?",
+      "SMART had been writing a novel. i finally read it."
+    ],
+    [
+      "my regex matches every test case",
+      "including the ones it shouldn't?",
+      "you had to ruin the moment."
+    ],
+    [
+      "someone committed a 400 MB log file",
+      "git remembers",
+      "so does everyone on this connection."
+    ],
+    [
+      "changed one config option, restarted three services",
+      "did it help?",
+      "not yet, but i have acquired four new log files."
+    ],
+    [
+      "the new intern asked why we still use IRC",
+      "what did you say?",
+      "because the channel has outlived six collaboration platforms."
+    ],
+    [
+      "i keep an emergency terminal open during upgrades",
+      "same. and a rescue USB nearby",
+      "and a second computer for pretending this was all planned."
+    ],
+    [
+      "found my old Linux install CDs",
+      "which distro?",
+      "three different ones, all labeled FINAL_THIS_ONE."
+    ],
+    [
+      "deploy finished with zero downtime",
+      "congrats!",
+      "i'm afraid to blink until the graphs settle."
+    ],
+    [
+      "the new library deleted half my application code",
+      "a successful refactor?",
+      "yes, this time intentionally."
+    ],
+    [
+      "just paid a trader through the channel",
+      "instant delivery?",
+      "yep. the bank ledger agrees. wish my real invoices worked like that."
+    ],
+    [
+      "PSA: shell access does not mean your logs are clean",
+      "someone had an exciting disconnect?",
+      "i would prefer the phrase educational disconnect."
+    ]
+  ],
+  "pools": {
+    "software": [
+      "Django",
+      "Python",
+      "PostgreSQL",
+      "nginx",
+      "Apache",
+      "PHP",
+      "MariaDB",
+      "Redis",
+      "SQLite",
+      "Git",
+      "OpenSSH",
+      "OpenSSL",
+      "rsync",
+      "curl",
+      "Ansible",
+      "Podman",
+      "Docker",
+      "Caddy",
+      "Gunicorn",
+      "uWSGI",
+      "Celery",
+      "RabbitMQ",
+      "Node.js",
+      "Vue",
+      "Vite",
+      "TypeScript",
+      "Rust",
+      "Go",
+      "Ruby",
+      "Perl",
+      "Lua",
+      "Neovim",
+      "Emacs",
+      "Vim",
+      "tmux",
+      "GNU screen",
+      "irssi",
+      "WeeChat",
+      "Zsh",
+      "Bash",
+      "Fish",
+      "systemd",
+      "BusyBox",
+      "WireGuard",
+      "QEMU",
+      "KVM",
+      "FFmpeg",
+      "ImageMagick",
+      "ZFS",
+      "Btrfs"
+    ],
+    "platform": [
+      "Debian stable",
+      "a spare ThinkPad",
+      "an old rack server",
+      "a tiny VPS",
+      "my Gentoo box",
+      "a FreeBSD jail",
+      "a disposable VM",
+      "a headless Alpine box",
+      "my Arch workstation",
+      "a secondhand mini PC",
+      "the home lab",
+      "a Slackware install",
+      "an Ubuntu staging host",
+      "an OpenBSD machine",
+      "a Fedora laptop",
+      "the office test rig"
+    ],
+    "reaction": [
+      "The release notes are actually useful.",
+      "One less workaround to carry.",
+      "My business app might finally get a quiet weekend.",
+      "The smaller memory footprint caught my eye.",
+      "Finally, the behavior the docs promised.",
+      "The changelog deserves its own coffee break.",
+      "Looks promising; staging gets the first turn.",
+      "The maintainers earned a donation today.",
+      "Someone fixed my oldest bookmarked issue.",
+      "The defaults finally make sense to me.",
+      "Might be time to retire my local patch.",
+      "Going to wait for the first bugfix release, but I'm tempted."
+    ],
+    "outcome": [
+      "the logs stayed boring, which is my favorite result",
+      "memory use stopped climbing overnight",
+      "the test suite finally finished before my coffee went cold",
+      "the old workaround is gone and nothing caught fire",
+      "the deploy was uneventful for a change",
+      "i found a config typo i'd blamed on the software",
+      "the benchmark improved, but i'm keeping the old numbers too",
+      "the rollback worked when i tested it",
+      "i learned more from the migration notes than the announcement",
+      "the service survived a reboot; small victories",
+      "startup is faster and the monitoring agrees",
+      "the docs answered the question before the channel did"
+    ],
+    "project": [
+      "a personal wiki",
+      "an underground zine archive",
+      "a tiny paste service",
+      "a family photo index",
+      "a home weather dashboard",
+      "a bug tracker",
+      "a music library browser",
+      "a notebook sync service",
+      "a forum for the local Linux group",
+      "a package mirror monitor",
+      "a book catalog",
+      "a hobby radio log",
+      "a static blog",
+      "a LAN party scoreboard",
+      "a recipe database",
+      "a terminal-themed portfolio",
+      "an uptime dashboard",
+      "a searchable manpage archive",
+      "a weekend game server",
+      "a backup inventory"
+    ],
+    "editor": [
+      "Vim",
+      "Neovim",
+      "Emacs",
+      "nano",
+      "Kate",
+      "Geany",
+      "a carefully configured terminal editor",
+      "the editor i promised not to reconfigure this week"
+    ]
+  },
+  "templates": [
+    [
+      "New {software} update landed. {reaction}",
+      "Have you tried it on {platform} yet?",
+      "yes: {outcome}. keeping the rollback notes anyway."
+    ],
+    [
+      "Testing {software} on {platform} this evening.",
+      "please post the results, not just a screenshot of the benchmark",
+      "fair request. so far {outcome}."
+    ],
+    [
+      "Using {software} for {project}. probably overkill, but it's my weekend.",
+      "overkill is how half of us learned this stuff",
+      "exactly. the README is now longer than the code."
+    ],
+    [
+      "Moved {project} onto {platform}.",
+      "and the backup plan?",
+      "tested restore first. {outcome}."
+    ],
+    [
+      "Anyone here using {software} outside a tutorial?",
+      "yes, on {platform}. boring in production is a compliment.",
+      "good to hear. {reaction}"
+    ],
+    [
+      "Reading the {software} changelog instead of sleeping.",
+      "anything worth staying up for?",
+      "{reaction} still doing the actual upgrade tomorrow."
+    ],
+    [
+      "My {software} experiment finally works on {platform}.",
+      "write the steps down before you forget the magic bit",
+      "already did. {outcome}. future me owes current me coffee."
+    ],
+    [
+      "Building {project} with {software}. dependency count remains under control.",
+      "give it a week",
+      "i have a lockfile and unreasonable optimism."
+    ],
+    [
+      "Configured {editor} on {platform}. only meant to change one keybinding.",
+      "how many hours ago?",
+      "please don't make me check my shell history."
+    ],
+    [
+      "Put the notes for {project} in version control.",
+      "including the failed approaches?",
+      "especially those. not making the same mistake on two weekends."
+    ],
+    [
+      "Little {software} maintenance window tonight. {reaction}",
+      "staging and a fresh backup first?",
+      "both done. {outcome}."
+    ],
+    [
+      "Finally documented how {project} runs on {platform}.",
+      "the person maintaining it next year thanks you",
+      "that person is probably me with less patience."
+    ]
+  ]
+}

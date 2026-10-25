@@ -4,7 +4,7 @@ const props = defineProps({ slot: Object, busy: Boolean, api: Function, send: Fu
 const channel = ref(null), text = ref(''), error = ref(''), output = ref(null), input = ref(null)
 const protocol = ref('SSH'), mode = ref('all'), following = ref(true)
 const offers = computed(() => (channel.value?.offers || []).filter(item => item.protocol === protocol.value && (mode.value === 'all' || item.mode === mode.value)))
-let timer, version = 0, disposed = false
+let timer, version = 0, disposed = false, refreshing = false
 function trackScroll() { if (output.value) following.value = output.value.scrollHeight - output.value.clientHeight - output.value.scrollTop < 35 }
 async function update(value, force = false) {
   channel.value = value
@@ -12,12 +12,13 @@ async function update(value, force = false) {
   if (output.value && (following.value || force)) output.value.scrollTop = output.value.scrollHeight
 }
 async function refresh() {
-  if (props.busy) return
+  if (props.busy || refreshing) return
+  refreshing = true
   const marker = version
   try {
     const result = await props.api(`slots/${props.slot.id}/irc/`)
     if (!disposed && marker === version && !props.busy) { error.value = ''; await update(result.irc) }
-  } catch (failure) { if (!disposed && marker === version) error.value = failure.message }
+  } catch (failure) { if (!disposed && marker === version) error.value = failure.message } finally { refreshing = false }
 }
 async function submit(raw = text.value) {
   if (!raw.trim() || props.busy) return
@@ -38,13 +39,14 @@ onUnmounted(() => { disposed = true; clearInterval(timer) })
   <p v-if="error" role="alert" class="info-banner">{{ error }}</p>
   <div class="irc-layout">
     <section class="panel irc-channel" aria-label="IRC channel">
-      <header><strong>#zero-day</strong><span class="micro">LOCAL BOT NETWORK / OFFERS EVERY 30s</span></header>
-      <div class="irc-members micro">ONLINE: {{ channel?.members.join(' · ') || 'Connecting…' }}</div>
+      <header><strong>#zero-day</strong><span class="micro">CHAT EVERY ~10s / EXPLOIT DROPS EVERY 30s</span></header>
+      <details class="irc-members micro"><summary>{{ channel ? `${channel.members.length} USERS ONLINE` : 'Connecting…' }} · #linux meets the underground</summary><div>{{ channel?.members.join(' · ') }}</div></details>
       <div ref="output" class="irc-messages" role="log" aria-label="IRC messages" aria-live="polite" tabindex="0" @scroll="trackScroll">
-        <p v-for="(message, index) in channel?.messages || []" :key="`${message.at}:${index}`" :class="{ 'irc-self': message.nick === slot.alias, 'irc-system': message.nick === 'ChanServ' }"><time>{{ new Date(message.at).toISOString().slice(11,19) }}</time> <strong>&lt;{{ message.nick }}&gt;</strong> <span>{{ message.text }}</span></p>
+        <p v-for="message in channel?.messages || []" :key="`${message.at}:${message.nick}:${message.text}`" :class="{ 'irc-self': message.nick === slot.alias, 'irc-system': message.nick === 'ChanServ', 'irc-drop': message.kind === 'drop' }"><time>{{ new Date(message.at).toISOString().slice(11,19) }}</time> <strong>&lt;{{ message.nick }}&gt;</strong> <span>{{ message.text }}</span></p>
       </div>
-      <div class="irc-shortcuts"><button v-for="command in ['/help', '/list', '/inventory', '/balance']" :key="command" class="text-link" :disabled="busy" @click="submit(command)">{{ command }}</button><button v-if="!following" class="text-link" @click="following = true; update(channel, true)">Jump to latest</button></div>
+      <div class="irc-shortcuts"><button v-for="command in ['/help', '/list', '/inventory', '/balance', '/clear']" :key="command" class="text-link" :disabled="busy" @click="submit(command)">{{ command }}</button><button v-if="!following" class="text-link" @click="following = true; update(channel, true)">Jump to latest</button></div>
       <form class="irc-input" @submit.prevent="submit()"><label for="irc-command">{{ slot.alias }} &gt;</label><input id="irc-command" ref="input" v-model="text" maxlength="240" autocomplete="off" spellcheck="false" aria-label="IRC command" placeholder="/msg hexdealer buy ssh-v1-r1-shot" :readonly="busy" /><button class="button secondary" :disabled="busy || !text.trim()">Send</button></form>
+      <p class="irc-hint">Scrollback is capped at {{ channel?.scrollback_limit || 200 }} messages. /clear clears saved chat; purchases stay in your stash and bank ledger.</p>
       <p class="irc-hint">/pay &lt;bot&gt; &lt;CPH&gt; &lt;exploit-id&gt; transfers the exact price and delivers your purchase atomically. These are simulated bots, not live players.</p>
     </section>
     <aside class="irc-trades">

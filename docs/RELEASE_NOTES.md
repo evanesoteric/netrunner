@@ -2,6 +2,12 @@
 
 Historical feature and migration notes. See the [README](../README.md) for the current project overview and [development guide](DEVELOPMENT.md) for setup and maintenance.
 
+## v0.13 — one terminal and fresh broker assignments
+
+All hacking software is now licensed terminal applets, including Cartograph, Rosetta, Tripwire, Wraith, Eclipse, and Lockpick's login modal. Atlas remains separate. Commercial services are page-only and no longer create processes or Workspace panels. Saved tool selections and useful logs migrate to the primary terminal; other save progress is retained.
+
+Accepted assignments leave the board permanently for that runner. Timed replacements have new identities, targets, and artifacts. Private per-save assignments avoid exhausting the global authored-content ID pool; 8-bit public ticket numbers stay unique among live offers. Migrations `0010` and `0011` preserve current jobs and retire previously consumed offers.
+
 ## v0.12 — local workstation, visible traces, and public directory
 
 The trace HUD now ticks elapsed time without Tripwire, uses a server deadline for monitored countdowns, and stays above login modals. Local files persist and consume aggregate drive space: use disconnected `ls`/`rm`, download ciphertext, and decrypt it locally with Rosetta before submission. Hardware fittings have their own installation animation. Sidebar services open full pages from Workspace, with a dedicated hardware/software shortcut. Atlas gains 40 public-access proxies available to Ghost players.

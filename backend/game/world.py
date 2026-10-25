@@ -4,13 +4,15 @@ from .models import DirectoryServer, GeneratedMission
 from .public_servers import PUBLIC_SERVERS, PUBLIC_BY_ID
 
 
-def all_contracts():
-    return CONTRACTS + [row.data for row in GeneratedMission.objects.order_by('key')]
+def all_contracts(slot=None):
+    return CONTRACTS + [row.data for row in GeneratedMission.objects.order_by('key')] + (list(slot.broker_jobs.values()) if slot else [])
 
 
-def get_contract(key):
+def get_contract(key, slot=None):
     if not key:
         return None
+    if slot and key in slot.broker_jobs:
+        return slot.broker_jobs[key]
     if key in CONTRACT_BY_ID:
         return CONTRACT_BY_ID[key]
     row = GeneratedMission.objects.filter(pk=key).first()
@@ -39,4 +41,4 @@ def target_for_server(server):
 
 
 def session_target(slot):
-    return slot.remote_host or get_contract(slot.active_contract)
+    return slot.remote_host or get_contract(slot.active_contract, slot)

@@ -2,11 +2,8 @@
 import { computed, ref, nextTick, onMounted, onActivated, onDeactivated, onBeforeUnmount } from 'vue'
 import { GripVertical, Maximize2, X, Square, Play } from 'lucide-vue-next'
 import TerminalConsole from './TerminalConsole.vue'
-import PasswordBreaker from './PasswordBreaker.vue'
 import ServerLogin from './ServerLogin.vue'
 import NetworkMap from './NetworkMap.vue'
-import BrokerView from './BrokerView.vue'
-import ExchangeView from './ExchangeView.vue'
 import FieldNotes from './FieldNotes.vue'
 import ServerHistory from './ServerHistory.vue'
 import BlackMarket from './BlackMarket.vue'
@@ -24,8 +21,7 @@ const extras = computed(() => [
   ...(props.slot.market_unlocked ? [{ id: 'blackmarket', name: 'Null Exchange' }] : []),
   ...(props.slot.installed_software.includes('rootkit-epic') ? [{ id: 'backdoors', name: 'Backdoored Servers' }] : []),
 ])
-const choices = computed(() => [...props.slot.builtins.map(app => ({ ...app, product_id: app.id })),
-  ...props.slot.catalog.filter(item => item.kind !== 'cleaner' && props.slot.installed_software.includes(item.id)).map(item => ({ ...item, product_id: item.id, id: item.kind })),
+const choices = computed(() => [...props.slot.builtins.filter(app => ['terminal','atlas'].includes(app.id)).map(app => ({ ...app, product_id: app.id })),
   ...extras.value.map(item => ({ ...item, product_id: item.id }))])
 const rows = computed(() => Math.max(6, ...panels.value.map(panel => panel.y + panel.h)))
 let timer, disposed = false, active = true, queued = null
@@ -210,14 +206,11 @@ defineExpose({ showApp })
     <section v-for="panel in panels" :key="panel.id" class="workspace-window panel" :data-workspace-window="panel.id" :style="narrow ? {} : { gridColumn: `${panel.x + 1} / span ${panel.w}`, gridRow: `${panel.y + 1} / span ${panel.h}` }" :aria-label="`${title(panel)} panel`">
       <header class="workspace-window-header"><button class="workspace-grip" :aria-label="`Move ${title(panel)}`" :disabled="narrow || loading" @pointerdown="begin($event, panel, 'move')" @pointermove="move" @pointerup="finish()" @pointercancel="finish(true)" @keydown="keyMove($event, panel, 'move')"><GripVertical :size="15" /></button><strong>{{ title(panel) }}</strong><span v-if="process(panel)" class="workspace-process-ram">{{ process(panel).ram }} GB</span><button v-if="process(panel)" class="workspace-control" :aria-label="`Stop ${title(panel)}`" :disabled="busy" @click="close(panel.id, slot.id)"><Square :size="12" /></button><button class="workspace-control" :aria-label="`Remove ${title(panel)} panel`" @click="removePanel(panel.id)"><X :size="14" /></button></header>
       <div class="workspace-window-body" :class="{ 'workspace-console-body': process(panel)?.console, 'workspace-atlas-body': panel.id === 'atlas' && process(panel) }">
-        <PasswordBreaker v-if="panel.id === 'cracker' && process(panel)" :slot="slot" :busy="busy" :action="breakerAction" />
-        <template v-else-if="process(panel)?.console">
+        <template v-if="process(panel)?.console">
         <ServerLogin v-if="panel.id === 'terminal'" :slot="slot" :busy="busy" @open-cracker="emit('open-cracker')" />
         <TerminalConsole :slot="slot" :application="panel.id" :busy="busy" :send="send" @open-cracker="emit('open-cracker')" embedded :autofocus="false" />
         </template>
         <NetworkMap v-else-if="panel.id === 'atlas' && process(panel)" map-only :slot="slot" :busy="busy" @save="emit('route', $event)" @directory="(action, id) => emit('directory', action, id)" />
-        <BrokerView v-else-if="panel.id === 'broker' && process(panel)" :slot="slot" :busy="busy" :now="now" :offset="offset" :ranks="ranks" @action="(action, job) => emit('contract', action, job)" />
-        <ExchangeView v-else-if="panel.id === 'market' && process(panel)" :slot="slot" :busy="busy" @trade="(action, id) => emit('trade', action, id)" />
         <FieldNotes v-else-if="panel.id === 'notes'" :slot-id="slot.id" :username="username" :api="api" />
         <ServerHistory v-else-if="panel.id === 'history'" :slot-id="slot.id" :api="api" :remote-target="slot.remote_target" />
         <BlackMarket v-else-if="panel.id === 'blackmarket' && slot.market_unlocked" :slot="slot" :busy="busy" @trade="(action, id) => emit('trade', action, id)" />

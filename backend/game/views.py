@@ -14,7 +14,7 @@ from .world import all_contracts, get_contract, all_servers
 from .models import SaveSlot, LedgerEntry
 from .persistence import current_target
 from .catalog import CURRENCY, RANKS, THRESHOLDS, PRODUCTS, BUILTIN_APPS, HOME_NODE
-from .mechanics import GameError, hardware, ram_used, route_stats, available_at, trace_remaining, settle, launch, trade, validate_route, execute, edit_directory, reserve, fail, storage_used
+from .mechanics import GameError, hardware, ram_used, route_stats, available_at, trace_remaining, settle, launch, trade, validate_route, execute, edit_directory, reserve, fail, storage_used, monitor_tool, select_applet
 
 def api(methods, authenticated=True):
     def decorate(fn):
@@ -45,10 +45,10 @@ def text_field(data, key, maximum):
     return value.strip()
 
 def serialize(slot, detailed=False):
-    mapping = codes()
+    mapping = codes(slot)
     servers = all_servers(slot)
-    monitor = PRODUCTS.get(slot.running_apps.get('monitor', ''))
-    job = get_contract(slot.active_contract)
+    monitor = monitor_tool(slot)
+    job = get_contract(slot.active_contract, slot)
     target = current_target(slot)
     tracing = trace_remaining(slot)
     started = slot.mission_state.get('trace_started', slot.mission_started.isoformat() if slot.mission_started else None) if tracing is not None else None
@@ -60,6 +60,7 @@ def serialize(slot, detailed=False):
         'next_rank_at': THRESHOLDS[slot.rank + 1] if slot.rank + 1 < len(RANKS) else None,
         'rank_floor': THRESHOLDS[slot.rank], 'completed': slot.completed,
         'active_contract': public_job(job, mapping),
+        'broker_next_at': min((entry['due_at'] for entry in slot.broker_pending), default=None),
         'connected': bool(slot.mission_started),
         'authenticated': bool(slot.mission_started and slot.mission_state.get('access')),
         'trace_active': tracing is not None,
@@ -73,13 +74,16 @@ def serialize(slot, detailed=False):
         'remote_node': {key: target[key] for key in ('target', 'x', 'y')} if target and slot.mission_started else None,
         'market_unlocked': slot.market_unlocked,
         'mission_log': slot.mission_log,
-        'trace_remaining': remaining if 'monitor' in slot.running_apps else None,
+        'trace_remaining': remaining,
+        'trace_monitor_product': monitor['id'] if monitor else None,
+        'cracker_product': slot.mission_state.get('password_tool') or slot.applet_preferences.get('cracker'),
         'trace_budget': slot.mission_state.get('trace_budget') if remaining is not None else None,
         'server_time': timezone.now().isoformat(),
     }
     if detailed:
         contracts = []
-        for job in all_contracts():
+        from .broker import offered_jobs
+        for job in offered_jobs(slot):
             if abs(job['rank'] - slot.rank) <= 1:
                 ready = available_at(slot, job['id'])
                 contracts.append({**public_job(job, mapping), 'available_at': ready.isoformat() if ready else None})
@@ -89,6 +93,7 @@ def serialize(slot, detailed=False):
             'workspace_revision': slot.workspace_revision,
             'equipment': hardware(slot),
             'local_files': slot.local_files,
+            'applet_preferences': slot.applet_preferences,
             'storage_used': storage_used(slot),
             'owned_hardware': slot.owned_hardware,
             'installed_software': slot.installed_software,
@@ -112,7 +117,7 @@ def serialize(slot, detailed=False):
 @ensure_csrf_cookie
 @api(['GET'], authenticated=False)
 def session(request):
-    return JsonResponse({'user': {'username': request.user.username} if request.user.is_authenticated else None, 'currency': CURRENCY, 'ranks': RANKS, 'version': '0.12.0', 'server_time': timezone.now().isoformat()})
+    return JsonResponse({'user': {'username': request.user.username} if request.user.is_authenticated else None, 'currency': CURRENCY, 'ranks': RANKS, 'version': '0.13.0', 'server_time': timezone.now().isoformat()})
 
 @api(['POST'], authenticated=False)
 def register(request):
@@ -198,7 +203,7 @@ def password_breaker(request, slot_id):
     settle(slot)
     action = request.data.get('action')
     if action == 'start':
-        start_break(slot)
+        start_break(slot, product_id=request.data.get('product_id'))
     elif action == 'cancel':
         cancel_break(slot)
     elif action == 'login':
@@ -206,6 +211,16 @@ def password_breaker(request, slot_id):
         login_target(slot)
     else:
         raise GameError('Choose start, cancel, or login.')
+    slot.save()
+    return JsonResponse(serialize(slot, True))
+
+
+@api(['POST'])
+@transaction.atomic
+def applets(request, slot_id):
+    slot = SaveSlot.objects.select_for_update().get(pk=slot_id, user=request.user)
+    settle(slot)
+    select_applet(slot, text_field(request.data, 'product_id', 80))
     slot.save()
     return JsonResponse(serialize(slot, True))
 
@@ -222,7 +237,7 @@ def applications(request, slot_id):
         app = text_field(request.data, 'application', 24)
         if app not in slot.running_apps:
             raise GameError('Application is not running.')
-        if app == 'cracker':
+        if app == 'terminal':
             from .passwords import cancel_break
             cancel_break(slot)
         slot.running_apps = {key: value for key, value in slot.running_apps.items() if key != app}
@@ -271,7 +286,7 @@ def restart(request, slot_id):
     if request.data.get('confirmation') != slot.alias:
         raise GameError('Type the runner alias exactly to confirm restarting this slot.')
     fresh = SaveSlot(user=request.user, alias=slot.alias, position=slot.position)
-    for field in ['balance', 'reputation', 'completed', 'equipment', 'owned_hardware', 'installed_software', 'running_apps', 'proxy_route', 'atlas_nodes', 'active_contract', 'mission_started', 'mission_state', 'local_files', 'mission_log', 'contract_cooldowns', 'backdoors', 'ransomware_ops', 'remote_host', 'market_unlocked', 'field_notes', 'notes_revision', 'notes_updated_at', 'workspace_layout', 'workspace_revision']:
+    for field in ['balance', 'reputation', 'completed', 'equipment', 'owned_hardware', 'installed_software', 'running_apps', 'proxy_route', 'atlas_nodes', 'active_contract', 'mission_started', 'mission_state', 'local_files', 'applet_preferences', 'broker_jobs', 'broker_consumed', 'broker_pending', 'broker_codes', 'mission_log', 'contract_cooldowns', 'backdoors', 'ransomware_ops', 'remote_host', 'market_unlocked', 'field_notes', 'notes_revision', 'notes_updated_at', 'workspace_layout', 'workspace_revision']:
         setattr(slot, field, getattr(fresh, field))
     slot.created_at = timezone.now()
     slot.save()
@@ -297,8 +312,8 @@ def contract_action(request, slot_id):
     if action == 'accept':
         reserve(slot, code)
     elif action == 'abort':
-        current = get_contract(slot.active_contract)
-        if not current or public_job(current)['id'] != code:
+        current = get_contract(slot.active_contract, slot)
+        if not current or public_job(current, codes(slot))['id'] != code:
             raise GameError('That assignment is no longer reserved. Refresh the broker.')
         fail(slot, 'Assignment abandoned.')
     else:

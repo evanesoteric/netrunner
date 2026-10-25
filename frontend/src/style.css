@@ -35,3 +35,8 @@
 
 /* The trace HUD is a body-level overlay and remains readable above login dialogs. */
 .trace-tracker.remote-status{z-index:2100}body:has(.trace-tracker) .app-shell main{padding-bottom:140px}body:has(.trace-tracker) .system-dialog-backdrop{padding-bottom:120px}body:has(.trace-tracker) .system-dialog{max-height:calc(100dvh - 156px)}.trace-tracker.unresolved .trace-meter{animation:trace-signal 2s linear infinite;background-size:24px 24px}@keyframes trace-signal{to{background-position:24px 0}}@media(prefers-reduced-motion:reduce){.trace-tracker.unresolved .trace-meter{animation:none}}
+
+.decoder-display>select{width:100%;background:#07130c;border:1px solid #3c6348;color:#9bd4ab;font:12px var(--mono);padding:10px}
+
+.broker-active{padding:20px;margin-bottom:18px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}.broker-active h2{font-size:16px}.broker-active code{font:10px var(--mono);color:#8ab997;overflow-wrap:anywhere}.broker-active .button{margin-left:auto;font-size:10px}
+.command-line input{scroll-margin-block:8px}

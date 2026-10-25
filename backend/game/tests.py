@@ -25,14 +25,19 @@ class APIHelpers:
         return f'slots/{self.slot.id}/{suffix}'
 
     def launch(self, product_id):
+        if product_id in ['broker','bank','market']: return self.refresh()
+        if product_id in PRODUCTS and PRODUCTS[product_id]['category'] == 'software':
+            self.post(self.endpoint('applications'), {'action': 'launch', 'product_id': 'terminal'})
+            return self.post(self.endpoint('applets'), {'product_id': product_id})
         return self.post(self.endpoint('applications'), {'action': 'launch', 'product_id': product_id})
 
     def cmd(self, command, app='terminal'):
+        if app not in ['terminal', 'bank']: app = 'terminal'
         if command.startswith('accept ') and command[7:] in CONTRACT_BY_ID:
             command = 'accept ' + public_code(command[7:])
         response = self.post(self.endpoint('command'), {'application': app, 'command': command})
         # Existing gameplay scenarios wait for Lockpick; timing is exercised separately.
-        if app == 'cracker' and response.get('password_break'):
+        if response.get('password_break') and command.startswith('crack '):
             slot = SaveSlot.objects.get(pk=self.slot.pk)
             slot.mission_state['password_break']['finishes_at'] = timezone.now().isoformat()
             slot.save()
@@ -213,14 +218,18 @@ class SimulationTests(APIHelpers, TestCase):
         self.post(self.endpoint('applications'), {'action': 'launch', 'product_id': 'decryptor-5-standard'}, 400)
 
     def test_ram_limits_process_close_and_tool_variants(self):
-        self.slot.installed_software += ['decryptor-1-standard', 'monitor-1-compact']
+        self.scan_and_connect()
+        self.slot.refresh_from_db()
+        self.slot.installed_software += ['cracker-5-standard', 'mapper-5-standard']
         self.slot.save()
-        for product in ['terminal', 'atlas', 'mapper-1-standard', 'cracker-1-standard']:
-            self.launch(product)
-        self.post(self.endpoint('applications'), {'action': 'launch', 'product_id': 'decryptor-1-standard'}, 400)
-        self.post(self.endpoint('applications'), {'action': 'close', 'application': 'mapper'})
-        response = self.launch('monitor-1-compact')
-        self.assertLessEqual(response['ram_used'], response['equipment']['memory']['ram'])
+        self.launch('cracker-5-standard')
+        result = self.post(self.endpoint('password-breaker'), {'action':'start'})
+        self.assertEqual(result['ram_used'], 9)
+        self.launch('mapper-5-standard')
+        self.assertIn('Not enough free RAM', self.cmd('scan helix-0.internal')['mission_log'][-1]['text'])
+        result = self.post(self.endpoint('password-breaker'), {'action':'cancel'})
+        self.assertEqual(result['ram_used'], 1)
+        self.assertIn('Scan complete', self.cmd('scan helix-0.internal')['mission_log'][-1]['text'])
 
     def test_multiple_named_products_per_category_and_tier(self):
         self.assertEqual(len(PRODUCTS), 92)
@@ -295,7 +304,6 @@ class SimulationTests(APIHelpers, TestCase):
         self.gain_access('0-1')
         response = self.cmd('get ledger.enc')
         self.assertTrue(response['local_files'][0]['encrypted'])
-        self.post(self.endpoint('applications'), {'action': 'close', 'application': 'mapper'})
         # End the session safely to buy a license; cracked files are preserved only in this game session.
         self.cmd('logcleaner')
         self.cmd('disconnect')
@@ -306,7 +314,6 @@ class SimulationTests(APIHelpers, TestCase):
         response = self.cmd('decrypt ledger.enc', 'decryptor')
         self.assertIn('decrypted. Checksum intact', self.log_text(response))
         self.cmd('get ledger.enc')
-        self.post(self.endpoint('applications'), {'action': 'close', 'application': 'decryptor'})
         self.clean_exit()
         response = self.cmd('submit')
         self.assertEqual(response['completed'], 1)
@@ -360,14 +367,18 @@ class SimulationTests(APIHelpers, TestCase):
         self.assertEqual(first['balance'], self.refresh()['balance'])
         self.assertEqual(self.slot.ledger.filter(description__startswith='Contract failure').count(), 2)
 
-    def test_cooldowns_use_server_time_and_jobs_return(self):
+    def test_retired_job_never_returns_and_a_new_assignment_arrives(self):
         self.reserve()
         self.cmd('abort')
-        response = self.cmd('accept 0-0')
-        self.assertIsNone(response['active_contract'])
-        self.assertIn('still sourcing', self.log_text(response))
-        SaveSlot.objects.filter(pk=self.slot.pk).update(contract_cooldowns={'0-0': (timezone.now() - timedelta(seconds=1)).isoformat()})
-        self.assertEqual(self.cmd('accept 0-0')['active_contract']['id'], public_code('0-0'))
+        result = self.cmd('accept 0-0')
+        self.assertIsNone(result['active_contract'])
+        self.assertIn('Unknown contract ID', result['mission_log'][-1]['text'])
+        self.slot.refresh_from_db()
+        self.slot.broker_pending[0]['due_at'] = (timezone.now()-timedelta(seconds=1)).isoformat()
+        self.slot.save()
+        offers = self.refresh()['contracts']
+        self.assertNotIn('helix-0.internal', [job['target'] for job in offers])
+        self.assertTrue(any(job['target'].startswith('broker-') for job in offers))
 
     def test_purchase_fit_sell_and_clearance(self):
         response = self.post(self.endpoint('loadout'), {'action': 'buy', 'product_id': 'gateway-1-specialist'})
@@ -380,14 +391,15 @@ class SimulationTests(APIHelpers, TestCase):
         self.post(self.endpoint('loadout'), {'action': 'buy', 'product_id': 'cpu-5-standard'}, 400)
         self.post(self.endpoint('loadout'), {'action': 'buy', 'product_id': 'gateway-1-specialist'}, 400)
 
-    def test_trace_monitor_exposes_time_only_while_running(self):
-        self.post(self.endpoint('loadout'), {'action': 'buy', 'product_id': 'monitor-1-standard'})
+    def test_owned_monitor_exposes_embedded_trace_without_a_process(self):
         self.gain_access()
         self.assertIsNone(self.refresh()['trace_remaining'])
+        self.slot.refresh_from_db()
+        self.slot.installed_software.append('monitor-1-standard')
+        self.slot.save()
         result = self.launch('monitor-1-standard')
         self.assertGreater(result['trace_remaining'], 0)
-        self.post(self.endpoint('applications'), {'action': 'close', 'application': 'monitor'})
-        self.assertIsNone(self.refresh()['trace_remaining'])
+        self.assertNotIn('monitor', [app['id'] for app in result['running_apps']])
 
     def test_monitor_must_decode_target_security(self):
         self.slot.installed_software.append('monitor-1-standard')
@@ -407,8 +419,7 @@ class SimulationTests(APIHelpers, TestCase):
         self.slot.save()
         for product in ['terminal', 'atlas', 'mapper-1-standard', 'cracker-1-standard', 'decryptor-1-standard']:
             self.launch(product)
-        self.post(self.endpoint('loadout'), {'action': 'equip', 'product_id': 'memory-1-standard'}, 400)
-        self.post(self.endpoint('applications'), {'action': 'close', 'application': 'decryptor'})
+        self.post(self.endpoint('loadout'), {'action': 'equip', 'product_id': 'memory-1-standard'})
         result = self.post(self.endpoint('loadout'), {'action': 'equip', 'product_id': 'memory-1-standard'})
         self.assertEqual(result['equipment']['memory']['ram'], 12)
 
@@ -555,6 +566,8 @@ class ConcurrentEconomyTests(APIHelpers, TransactionTestCase):
         self.assertEqual(self.slot.balance, 2000)
         self.assertEqual(self.slot.ransomware_ops, [])
         self.assertEqual(self.slot.ledger.filter(description__startswith='Ransomware payout').count(), 1)
+        payout=next(entry for entry in self.slot.mission_log if 'you earned' in entry['text'])
+        self.assertEqual(payout['app'],'terminal')
 
     def test_concurrent_password_starts_charge_once_and_completion_records_once(self):
         self.scan_and_connect()
@@ -572,6 +585,17 @@ class ConcurrentEconomyTests(APIHelpers, TransactionTestCase):
         self.assertFalse(self.slot.mission_state['access'])
         self.assertCountEqual(self.parallel_post('password-breaker', {'action': 'login'}), [200, 400])
         self.assertEqual(self.slot.server_states.get(address='helix-0.internal').events.filter(kind='access_granted').count(), 1)
+
+    def test_concurrent_broker_refresh_creates_one_replacement(self):
+        self.reserve()
+        self.cmd('abort')
+        self.slot.refresh_from_db()
+        self.slot.broker_pending[0]['due_at']=(timezone.now()-timedelta(seconds=1)).isoformat()
+        self.slot.save()
+        self.assertEqual(self.parallel_post('command',{'application':'terminal','command':'status'}),[200,200])
+        self.slot.refresh_from_db()
+        self.assertEqual(len(self.slot.broker_jobs),1)
+        self.assertEqual(self.slot.broker_pending,[])
 
     def test_concurrent_note_edits_cannot_silently_overwrite_each_other(self):
         identity = self.slot.created_at.isoformat()
@@ -901,7 +925,7 @@ class HiddenOperationsTests(APIHelpers, TestCase):
         self.cmd('disconnect')
         result = self.cmd('submit')
         self.assertIn('Delivery verified', self.log_text(result))
-        self.assertEqual(result['balance'], before + 220)
+        self.assertEqual(result['balance'], before)
 
     def test_backdoor_requests_require_ownership_known_target_and_slot_ownership(self):
         self.post(self.endpoint('backdoors'), {'target': 'helix-0.internal'}, 400)
@@ -1094,7 +1118,8 @@ class PersistentWorldTests(APIHelpers, TestCase):
             self.cmd('rm archive/r2/audit.log')
             self.clean_exit()
             result = self.cmd('submit')
-            self.assertEqual(result['completed'], 2)
+            self.assertEqual(result['completed'], 1)
+            self.assertNotIn('helix-2.internal', [job['target'] for job in result['contracts']])
         self.assertEqual(server.events.filter(kind='administrator_patch').count(), 1)
 
     def test_live_wraith_session_delays_maintenance_without_losing_backdoor(self):
@@ -1221,7 +1246,7 @@ class WorkspaceTests(APIHelpers, TestCase):
     def test_layout_persists_across_login_without_launching_or_charging_apps(self):
         from .workspace import validate_workspace
         initial = self.workspace()
-        self.assertEqual(len(initial['layout']), 4)
+        self.assertEqual(len(initial['layout']), 2)
         validate_workspace(initial['layout'])
         custom = [dict(id='terminal', product_id='terminal', x=2, y=1, w=8, h=6), dict(id='notes', product_id='notes', x=0, y=8, w=6, h=5)]
         self.assertEqual(self.save_layout(custom)['revision'], 1)
@@ -1259,7 +1284,7 @@ class WorkspaceTests(APIHelpers, TestCase):
         self.assertEqual(self.save_layout([], revision=1)['layout'], [])
 
     def test_layout_preferences_do_not_bypass_license_or_ram_limits(self):
-        self.save_layout([dict(id='rootkit', product_id='rootkit-epic', x=0, y=0, w=6, h=5)])
+        self.save_layout([dict(id='rootkit', product_id='rootkit-epic', x=0, y=0, w=6, h=5)], status=400)
         self.post(self.endpoint('applications'), {'action': 'launch', 'product_id': 'rootkit-epic'}, 400)
         self.slot.refresh_from_db()
         self.assertNotIn('rootkit-epic', self.slot.installed_software)
@@ -1313,7 +1338,6 @@ class PasswordBreakerTests(APIHelpers, TestCase):
         self.assertIn('not logged in', self.log_text(self.cmd('get research.dat')))
 
     def test_monitor_reports_no_active_trace_at_server_login(self):
-        self.post(self.endpoint('applications'), {'action': 'close', 'application': 'mapper'})
         self.slot.refresh_from_db()
         self.slot.installed_software.append('monitor-1-standard')
         self.slot.save()
@@ -1328,7 +1352,7 @@ class PasswordBreakerTests(APIHelpers, TestCase):
         self.assertFalse(result['trace_active'])
         self.assertGreaterEqual(result['password_break']['duration'], 4)
         self.assertFalse(self.refresh()['authenticated'])
-        self.assertFalse(next(app for app in result['running_apps'] if app['id'] == 'cracker')['console'])
+        self.assertNotIn('cracker', [app['id'] for app in result['running_apps']])
         result = self.finish_at(7)
         self.assertFalse(result['authenticated'])
         self.assertFalse(result['trace_active'])
@@ -1381,7 +1405,7 @@ class PasswordBreakerTests(APIHelpers, TestCase):
 
     def test_stop_cancels_and_reopening_does_not_resume(self):
         self.start()
-        result = self.post(self.endpoint('applications'), {'action': 'close', 'application': 'cracker'})
+        result = self.post(self.endpoint('applications'), {'action': 'close', 'application': 'terminal'})
         self.assertIsNone(result['password_break'])
         result = self.launch('cracker-1-standard')
         self.assertFalse(result['authenticated'])
@@ -1412,7 +1436,7 @@ class PasswordBreakerTests(APIHelpers, TestCase):
         self.cmd('scan helix-0.internal', 'mapper')
         SaveSlot.objects.filter(pk=self.slot.pk).update(balance=0)
         self.post(self.endpoint('password-breaker'), {'action': 'start'}, 400)
-        self.post(self.endpoint('applications'), {'action': 'close', 'application': 'cracker'})
+        self.post(self.endpoint('applications'), {'action': 'close', 'application': 'terminal'})
         self.post(self.endpoint('password-breaker'), {'action': 'start'}, 400)
         self.assertIsNone(self.refresh()['password_break'])
 
@@ -1477,7 +1501,10 @@ class IntegratedLogcleanerTests(APIHelpers, TestCase):
         self.slot.running_apps['atlas'] = 'atlas'
         self.slot.installed_software.append('monitor-1-standard')
         self.slot.save()
-        self.assertIn('Not enough free RAM', self.cmd('logcleaner')['mission_log'][-1]['text'])
+        from unittest.mock import patch
+        from .catalog import HARDWARE
+        with patch.dict(HARDWARE[self.slot.equipment['memory']], {'ram':2}):
+            self.assertIn('Not enough free RAM', self.cmd('logcleaner')['mission_log'][-1]['text'])
         self.slot.refresh_from_db()
         self.assertTrue(self.slot.mission_state['dirty'])
         self.assertNotIn('cleaner', self.slot.running_apps)
@@ -1554,7 +1581,7 @@ class TerminalCartographTests(APIHelpers, TestCase):
         standalone = self.cmd('scan helix-0.internal', 'mapper')['mission_log'][-1]['text']
         result = self.cmd('scan helix-0.internal')
         self.assertEqual(result['mission_log'][-1]['text'], standalone)
-        self.assertEqual(next(app['product_id'] for app in result['running_apps'] if app['id'] == 'mapper'), 'mapper-1-standard')
+        self.assertEqual(result['applet_preferences']['mapper'], 'mapper-1-standard')
 
     def test_scan_requires_license_funds_memory_and_capability(self):
         self.reserve()
@@ -1572,7 +1599,10 @@ class TerminalCartographTests(APIHelpers, TestCase):
         self.slot.equipment['memory'] = 'memory-1-specialist'
         self.slot.running_apps = {'terminal': 'terminal', 'cracker': 'cracker-5-standard', 'decryptor': 'decryptor-5-standard', 'atlas': 'atlas'}
         self.slot.save()
-        self.assertIn('Not enough free RAM', self.cmd('scan helix-0.internal')['mission_log'][-1]['text'])
+        from unittest.mock import patch
+        from .catalog import HARDWARE
+        with patch.dict(HARDWARE[self.slot.equipment['memory']], {'ram':2}):
+            self.assertIn('Not enough free RAM', self.cmd('scan helix-0.internal')['mission_log'][-1]['text'])
         self.slot.refresh_from_db()
         self.slot.running_apps = {'terminal': 'terminal'}
         self.slot.save()
@@ -1722,11 +1752,14 @@ class LocalFilesystemMigrationTests(TransactionTestCase):
             slot = old.get_model('game', 'SaveSlot').objects.create(user_id=user.pk, position=1, alias='Archive', active_contract='0-0', mission_state={'recovered': True, 'local_size': 24, 'clean_exit': True})
             executor = MigrationExecutor(connection)
             executor.migrate([('game', '0009_saveslot_local_files')])
-            updated = SaveSlot.objects.get(pk=slot.pk)
+            updated = executor.loader.project_state([('game','0009_saveslot_local_files')]).apps.get_model('game','SaveSlot').objects.get(pk=slot.pk)
             self.assertEqual(updated.local_files[0]['name'], 'research.dat')
             self.assertEqual(updated.local_files[0]['size'], 24)
             self.assertEqual(updated.mission_state['local_file_id'], updated.local_files[0]['id'])
             self.assertNotIn('local_size', updated.mission_state)
+            executor = MigrationExecutor(connection)
+            executor.migrate(executor.loader.graph.leaf_nodes())
+            updated = SaveSlot.objects.get(pk=slot.pk)
             from .mechanics import execute
             updated.running_apps = {'terminal': 'terminal'}
             execute(updated, 'terminal', 'submit')
@@ -1781,3 +1814,100 @@ class LocalDecryptionTests(APIHelpers, TestCase):
         self.slot.save()
         self.assertIn('decrypted locally', self.cmd('decrypt ledger.enc', 'decryptor')['mission_log'][-1]['text'])
         self.assertIn('not encrypted', self.cmd('decrypt ledger.enc', 'decryptor')['mission_log'][-1]['text'])
+
+
+class FreshBrokerTests(APIHelpers, TestCase):
+    def setUp(self):
+        user = get_user_model().objects.create_user('fresh-broker')
+        self.client.force_login(user)
+        self.slot = SaveSlot.objects.create(user=user, position=1, alias='Fresh')
+
+    def test_accept_removes_offer_and_due_replacement_has_new_identity_target_and_artifact(self):
+        original = next(job for job in self.refresh()['contracts'] if job['target']=='helix-0.internal')
+        accepted = self.reserve()
+        self.assertEqual(len(accepted['contracts']),5)
+        self.assertNotIn(original['target'],[job['target'] for job in accepted['contracts']])
+        self.slot.refresh_from_db()
+        self.slot.broker_pending[0]['due_at']=(timezone.now()-timedelta(seconds=1)).isoformat()
+        self.slot.save()
+        updated = self.refresh()
+        new = next(job for job in updated['contracts'] if job['target'].startswith('broker-'))
+        self.assertNotEqual(new['file'], original['file'])
+        self.assertNotEqual(new['id'], original['id'])
+        self.assertEqual(updated['active_contract']['target'], original['target'])
+        self.assertEqual(len(self.refresh()['contracts']),6)
+        self.slot.refresh_from_db()
+        self.assertEqual(len(self.slot.broker_jobs),1)
+
+    def test_replacement_is_playable_and_state_is_private_to_each_save(self):
+        self.reserve(); self.cmd('abort')
+        self.slot.refresh_from_db()
+        self.slot.broker_pending[0]['due_at']=(timezone.now()-timedelta(seconds=1)).isoformat()
+        self.slot.save()
+        new=next(job for job in self.refresh()['contracts'] if job['target'].startswith('broker-'))
+        self.cmd(f'accept {new["id"]}')
+        self.cmd(f'scan {new["target"]}')
+        self.cmd(f'connect {new["target"]}')
+        self.cmd(f'crack {new["port"]}')
+        self.cmd(f'get {new["file"]}')
+        self.clean_exit()
+        self.assertIn('Delivery verified',self.cmd('submit')['mission_log'][-1]['text'])
+        other=SaveSlot.objects.create(user=self.slot.user,position=2,alias='Other')
+        self.assertIn('helix-0.internal',[job['target'] for job in self.client.get(f'/api/slots/{other.pk}/').json()['contracts']])
+
+
+class TerminalAppletTests(APIHelpers, TestCase):
+    def setUp(self):
+        user=get_user_model().objects.create_user('applet-runner')
+        self.client.force_login(user)
+        self.slot=SaveSlot.objects.create(user=user,position=1,alias='Applet')
+
+    def test_commercial_services_do_not_run_as_processes_or_workspace_panels(self):
+        for service in ['broker','bank','market']:
+            self.post(self.endpoint('applications'),{'action':'launch','product_id':service},400)
+            workspace=self.client.get(f'/api/slots/{self.slot.pk}/workspace/').json()
+            self.post(self.endpoint('workspace'),{'layout':[dict(id=service,product_id=service,x=0,y=0,w=6,h=5)],'revision':workspace['revision'],'identity':workspace['identity']},400)
+        self.assertEqual(self.refresh()['running_apps'],[])
+        self.assertIn('Available:',self.cmd('balance','bank')['mission_log'][-1]['text'])
+        self.assertEqual(self.refresh()['ram_used'],0)
+
+    def test_selling_a_selected_license_clears_preferences_and_allows_an_owned_fallback(self):
+        self.slot.installed_software += ['mapper-1-compact','cracker-1-compact']
+        self.slot.save()
+        for product in ['mapper-1-standard','cracker-1-standard']:
+            self.launch(product)
+            result=self.post(self.endpoint('loadout'),{'action':'sell','product_id':product})
+            self.assertNotIn(PRODUCTS[product]['kind'],result['applet_preferences'])
+        self.assertIsNone(self.refresh()['cracker_product'])
+        self.reserve()
+        self.assertIn('Scan complete',self.cmd('scan helix-0.internal')['mission_log'][-1]['text'])
+
+    def test_all_software_is_rejected_as_process_and_preferences_persist_without_ram(self):
+        for product in ['mapper-1-standard','cracker-1-standard','cleaner-1-standard']:
+            self.post(self.endpoint('applications'),{'action':'launch','product_id':product},400)
+        self.launch('mapper-1-standard')
+        data=self.refresh()
+        self.assertEqual(data['ram_used'],1)
+        self.assertEqual(data['applet_preferences']['mapper'],'mapper-1-standard')
+        self.assertEqual([app['id'] for app in data['running_apps']],['terminal'])
+        self.post(self.endpoint('applets'),{'product_id':'rootkit-epic'},400)
+
+
+class TerminalAppletMigrationTests(TransactionTestCase):
+    def test_saved_tool_and_commercial_panels_become_terminal_preferences_and_page_services(self):
+        executor=MigrationExecutor(connection)
+        executor.migrate([('game','0009_saveslot_local_files')])
+        try:
+            old=executor.loader.project_state([('game','0009_saveslot_local_files')]).apps
+            user=old.get_model('auth','User').objects.create(username='bundle-veteran')
+            layout=[dict(id='terminal',product_id='terminal',x=0,y=0,w=6,h=5),dict(id='mapper',product_id='mapper-1-standard',x=6,y=0,w=6,h=5),dict(id='bank',product_id='bank',x=0,y=5,w=6,h=5)]
+            slot=old.get_model('game','SaveSlot').objects.create(user_id=user.pk,position=1,alias='Bundled',running_apps={'terminal':'terminal','mapper':'mapper-1-standard','bank':'bank','market':'market'},workspace_layout=layout,field_notes='Preserve notebook',mission_log=[dict(app='mapper',text='Scan complete')])
+            executor=MigrationExecutor(connection);executor.migrate(executor.loader.graph.leaf_nodes())
+            saved=SaveSlot.objects.get(pk=slot.pk)
+            self.assertEqual(saved.running_apps,{'terminal':'terminal'})
+            self.assertEqual(saved.workspace_layout,[layout[0]])
+            self.assertEqual(saved.applet_preferences['mapper'],'mapper-1-standard')
+            self.assertEqual(saved.field_notes,'Preserve notebook')
+            self.assertEqual(saved.mission_log[0]['app'],'terminal')
+        finally:
+            restore=MigrationExecutor(connection);restore.migrate(restore.loader.graph.leaf_nodes())

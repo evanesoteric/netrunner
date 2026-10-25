@@ -6,10 +6,11 @@ const props = defineProps({ slot: Object, application: String, busy: Boolean, se
 const emit = defineEmits(['open-cracker'])
 const cleaner = ref('')
 const cleaners = computed(() => props.slot.catalog.filter(item => item.kind === 'cleaner' && props.slot.installed_software.includes(item.id)))
-watch(cleaners, items => { if (!items.some(item => item.id === cleaner.value)) cleaner.value = items[0]?.id || '' }, { immediate: true })
+watch(cleaners, items => { if (!items.some(item => item.id === cleaner.value)) cleaner.value = items.find(item => item.id === props.slot.applet_preferences?.cleaner)?.id || items[0]?.id || '' }, { immediate: true })
+watch(() => props.slot.applet_preferences?.cleaner, selected => { if (cleaners.value.some(item => item.id === selected)) cleaner.value = selected })
 const input = ref(null), output = ref(null), value = ref(''), histories = ref({}), historyIndex = ref(-1)
 const entries = computed(() => props.slot.mission_log.filter(line => line.app === props.application))
-const name = computed(() => props.slot.running_apps.find(app => app.id === props.application)?.name || props.application)
+const name = computed(() => props.slot.running_apps.find(app => app.id === props.application)?.name || (props.application === 'bank' ? 'Cipher bank' : props.application))
 const inputId = computed(() => `console-command-${props.application}${props.embedded ? '-workspace' : ''}`)
 const following = ref(true), matches = ref([]), matchRange = ref(null)
 const logSignature = computed(() => JSON.stringify(entries.value))
@@ -31,7 +32,7 @@ function applyCompletion(candidate) {
   value.value = value.value.slice(0, range.start) + replacement + (suffix.startsWith(' ') ? suffix.slice(1) : suffix)
   const cursor = range.start + replacement.length
   resetCompletion()
-  nextTick(() => { focus(); input.value?.setSelectionRange(cursor, cursor) })
+  nextTick(() => { focus(); input.value?.setSelectionRange(cursor, cursor); input.value?.scrollIntoView({ block:'nearest', inline:'nearest' }) })
 }
 function complete(event) {
   // Shift+Tab retains normal keyboard navigation out of the terminal.
@@ -48,6 +49,7 @@ function complete(event) {
       matchRange.value.end = result.start + result.common.length
       nextTick(() => input.value?.setSelectionRange(matchRange.value.end, matchRange.value.end))
     }
+    nextTick(() => input.value?.scrollIntoView({ block:'nearest', inline:'nearest' }))
   }
 }
 
@@ -92,7 +94,7 @@ onMounted(async () => { resetCompletion(); await scroll(true); if (props.autofoc
   <section class="panel terminal-panel">
     <div class="panel-title"><span><Terminal :size="16" /> {{ name.toUpperCase() }}</span><span class="panel-meta">{{ application === 'bank' ? 'CIPHER PRIVATE ACCOUNT' : slot.connected ? 'REMOTE LINK ACTIVE' : application === 'terminal' ? `LOCAL DRIVE ${slot.storage_used} / ${slot.equipment.storage.capacity} MB` : 'LOCAL SESSION' }}</span></div>
     <div ref="output" class="terminal-log" role="log" :aria-label="`${application} output`" @pointerup="focusOutput" @scroll="trackScroll">
-      <div class="terminal-banner">NETRUNNER / {{ application.toUpperCase() }} [v0.12]<br>{{ application === 'terminal' ? (slot.authenticated ? `Remote shell / admin@${slot.remote_target}.` : 'Local shell ready. Launch separate tools from Applications.') : 'Application process ready.' }} Type help for its reference manual.<br>─────────────────────────────────────────────────────</div>
+      <div class="terminal-banner">NETRUNNER / {{ application.toUpperCase() }} [v0.13]<br>{{ application === 'terminal' ? (slot.authenticated ? `Remote shell / admin@${slot.remote_target}.` : 'Local shell ready. Owned software applets run here. Type applets to list them.') : 'Application process ready.' }} Type help for its reference manual.<br>─────────────────────────────────────────────────────</div>
       <pre v-for="(entry, i) in entries" :key="i">{{ entry.text }}</pre>
       <span v-if="busy" class="terminal-muted" role="status">PROCESSING…</span>
     </div>

@@ -4,12 +4,9 @@ from .catalog import SOFTWARE, BUILTIN_APPS
 
 
 def default_workspace():
-    return [
-        dict(id='terminal', product_id='terminal', x=0, y=0, w=6, h=5),
-        dict(id='atlas', product_id='atlas', x=6, y=0, w=6, h=5),
-        dict(id='mapper', product_id='mapper-1-standard', x=0, y=5, w=6, h=5),
-        dict(id='cracker', product_id='cracker-1-standard', x=6, y=5, w=6, h=5),
-    ]
+    return [dict(id='terminal', product_id='terminal', x=0, y=0, w=7, h=8),
+            dict(id='atlas', product_id='atlas', x=7, y=0, w=5, h=8)]
+
 
 
 def validate_workspace(layout):
@@ -24,8 +21,10 @@ def validate_workspace(layout):
         if not isinstance(key, str) or not isinstance(product, str) or key in seen:
             raise ValidationError('Workspace panels must have unique application IDs.')
         seen.add(key)
-        if key == 'cleaner':
-            raise ValidationError('Logcleaner is a terminal extension, not a workspace panel.')
+        if key in {'bank','broker','market'}:
+            raise ValidationError('Online services have their own pages and cannot be Workspace panels.')
+        if product in SOFTWARE:
+            raise ValidationError('Software applets run inside the primary terminal, not standalone panels.')
         if key in BUILTIN_APPS or key in services:
             valid = product == key
         else:

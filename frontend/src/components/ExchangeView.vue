@@ -10,7 +10,7 @@ const fitted = item => Object.values(props.slot.equipment).some(current => curre
 const running = item => props.slot.running_apps.some(app => app.product_id === item.id)
 const products = computed(() => props.slot.catalog.filter(item => (item.kind || item.category) === category.value && (tier.value === 'all' || item.tier === Number(tier.value)) && (!ownedOnly.value || owned(item))))
 const money = n => new Intl.NumberFormat('en-US').format(n)
-const stat = item => item.category === 'cpu' ? `${item.speed}× COMPUTE` : item.category === 'gateway' ? `${item.hops} HOPS / ${item.stealth} STEALTH / ${item.bandwidth} MB/s` : item.category === 'memory' ? `${item.ram} GB RAM` : item.category === 'storage' ? `${item.capacity} MB STORAGE` : `CLASS ${item.power} / ${item.ram} GB / ${item.speed}× SPEED`
+const stat = item => item.kind === 'monitor' ? `CLASS ${item.power} / PASSIVE TERMINAL TELEMETRY` : item.category === 'cpu' ? `${item.speed}× COMPUTE` : item.category === 'gateway' ? `${item.hops} HOPS / ${item.stealth} STEALTH / ${item.bandwidth} MB/s` : item.category === 'memory' ? `${item.ram} GB RAM` : item.category === 'storage' ? `${item.capacity} MB STORAGE` : `CLASS ${item.power} / ${item.ram} GB / ${item.speed}× SPEED`
 const icon = item => ({ cpu: Cpu, gateway: Radio, memory: MemoryStick, storage: HardDrive }[item.category] || Code2)
 </script>
 

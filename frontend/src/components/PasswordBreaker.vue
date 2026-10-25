@@ -13,9 +13,13 @@ const seconds = computed(() => attempt.value ? Math.max(0, Math.ceil((Date.parse
 const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%&*+-/<>?'
 const password = computed(() => ready.value ? '************' : attempt.value ? Array.from({ length: 12 }, (_, i) => i < Math.floor(progress.value * 12) ? '*' : alphabet[(Math.floor(tick.value / 95) * (i + 7) + i * 13) % alphabet.length]).join('') : '')
 const status = computed(() => props.slot.authenticated ? 'SESSION ACTIVE' : ready.value ? 'PASSWORD DECODED' : attempt.value ? seconds.value ? 'BREAKING PASSWORD' : 'VERIFYING PASSWORD' : props.slot.password_result === 'failed' ? 'INSUFFICIENT CAPABILITY' : props.slot.password_result === 'cancelled' ? 'ATTEMPT CANCELLED' : 'AWAITING TARGET')
-const tool = computed(() => props.slot.running_apps.find(app => app.id === 'cracker'))
-const product = computed(() => props.slot.catalog.find(item => item.id === tool.value?.product_id))
-async function run(action) { if (action === 'login' && (!ready.value || props.slot.authenticated)) return; await props.action(action, props.slot.id) }
+const licenses = computed(() => props.slot.catalog.filter(item => item.kind === 'cracker' && props.slot.installed_software.includes(item.id)))
+const selected = ref('')
+watch(licenses, items => { if (!items.some(item => item.id === selected.value)) selected.value = props.slot.cracker_product || [...items].sort((a,b) => b.power-a.power || b.speed-a.speed)[0]?.id || '' }, { immediate:true })
+const product = computed(() => props.slot.catalog.find(item => item.id === (attempt.value?.product_id || selected.value)))
+const tool = computed(() => product.value)
+async function run(action) { if (action === 'login' && (!ready.value || props.slot.authenticated)) return; await props.action(action, props.slot.id, selected.value) }
+
 onMounted(() => { timer = setInterval(() => { tick.value = Date.now() }, 95) })
 onBeforeUnmount(() => clearInterval(timer))
 </script>
@@ -24,6 +28,7 @@ onBeforeUnmount(() => clearInterval(timer))
     <div class="panel-title"><span><KeyRound :size="16" /> {{ tool?.name || 'LOCKPICK' }}</span><span class="panel-meta">SERVER LOGIN</span></div>
     <form class="decoder-display" :class="{ working: attempt }" @submit.prevent="run('login')">
       <div class="decoder-meta"><span>{{ slot.connected ? `${slot.remote_target}${port ? ':' + port : ''}` : 'NO REMOTE CONNECTION' }}</span><span>CLASS {{ product?.power }} / {{ tool?.ram }} GB</span></div>
+      <label :for="`${id}-license`">LOCKPICK LICENSE</label><select :id="`${id}-license`" v-model="selected" aria-label="Lockpick license" :disabled="busy || !!attempt || ready"><option v-for="license in licenses" :key="license.id" :value="license.id">{{ license.name }}</option></select>
       <label :for="`${id}-login`">LOGIN</label><input :id="`${id}-login`" class="login-user" aria-label="Login username" value="admin" readonly autocomplete="off" />
       <label :for="`${id}-password`">PASSWORD</label><input :id="`${id}-password`" class="decoder-password" aria-label="Password" :value="password" placeholder="Awaiting password breaker" readonly autocomplete="off" spellcheck="false" />
       <div class="decoder-progress" role="progressbar" aria-label="Password breaking progress" :aria-valuenow="Math.floor(progress * 100)" aria-valuemin="0" aria-valuemax="100"><i :style="{ width: `${progress * 100}%` }"></i></div>

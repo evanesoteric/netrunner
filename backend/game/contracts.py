@@ -2,8 +2,9 @@
 from .models import ContractIdentity
 
 
-def codes():
-    return dict(ContractIdentity.objects.values_list('template_key', 'code'))
+def codes(slot=None):
+    base = dict(ContractIdentity.objects.values_list('template_key', 'code'))
+    return {**base, **slot.broker_codes} if slot else base
 
 
 def public_job(job, mapping=None):
@@ -13,7 +14,9 @@ def public_job(job, mapping=None):
     return {**job, 'id': str(mapping[job['id']])}
 
 
-def public_code(key):
+def public_code(key, slot=None):
+    if slot and key in slot.broker_codes:
+        return str(slot.broker_codes[key])
     return str(ContractIdentity.objects.get(template_key=key).code)
 
 

@@ -98,6 +98,10 @@ async function logOut() {
 }
 async function navigate(item) {
   if (item.id === 'saves') return openSaves()
+  if (['broker','bank','exchange'].includes(item.id)) {
+    await act(async () => { updateSlot(await api(`slots/${slot.value.id}/`)); page.value=item.id })
+    return
+  }
   const application = { broker: 'broker', bank: 'bank', atlas: 'atlas', exchange: 'market' }[item.id]
   if (application) {
     await act(async () => {
@@ -116,6 +120,7 @@ function activate(app) {
   activeConsole.value = app; page.value = ({ atlas: 'atlas', broker: 'broker', market: 'exchange', bank: 'bank' }[app] || 'console'); nextTick(() => document.querySelector('input[aria-label$=" command"]')?.focus({ preventScroll: true })) }
 async function launchApplication(productId, stay = false, expectedSlot = null) {
   if (expectedSlot !== null && slot.value?.id !== expectedSlot) return false
+  if (['broker','bank','market'].includes(productId)) { await navigate({ id: productId === 'market' ? 'exchange' : productId }); return true }
   return act(async () => {
     const result = await api(`slots/${slot.value.id}/applications/`, { action: 'launch', product_id: productId })
     updateSlot(result)
@@ -124,6 +129,16 @@ async function launchApplication(productId, stay = false, expectedSlot = null) {
     if (page.value === 'workspace') workspaceRef.value?.showApp(productId)
     return true
   })
+}
+async function useApplet(productId) {
+  const item = slot.value.catalog.find(item => item.id === productId)
+  const success = await act(async () => {
+    updateSlot(await api(`slots/${slot.value.id}/applets/`, { product_id: productId }))
+    if (!slot.value.running_apps.some(app => app.id === 'terminal')) updateSlot(await api(`slots/${slot.value.id}/applications/`, { action:'launch', product_id:'terminal' }))
+    activate('terminal')
+    return true
+  })
+  if (success && item?.kind === 'cracker' && slot.value.connected) await openCracker()
 }
 async function closeApplication(application, stay = false, expectedSlot = null) {
   if (expectedSlot !== null && slot.value?.id !== expectedSlot) return false
@@ -136,9 +151,9 @@ async function closeApplication(application, stay = false, expectedSlot = null) 
 async function sendCommand(command, application) {
   return act(async () => { updateSlot(await api(`slots/${slot.value.id}/command/`, { command, application })); return true })
 }
-async function breakerAction(action, expectedSlot) {
+async function breakerAction(action, expectedSlot, productId = null) {
   if (slot.value?.id !== expectedSlot) return false
-  const success = await act(async () => { updateSlot(await api(`slots/${expectedSlot}/password-breaker/`, { action })); return true })
+  const success = await act(async () => { updateSlot(await api(`slots/${expectedSlot}/password-breaker/`, { action, product_id: productId })); return true })
   if (action === 'login') {
     loginDialog.value = false
     if (success) { activate('terminal'); await nextTick(); document.querySelector('input[aria-label$=" command"]')?.focus({ preventScroll: true }) }
@@ -151,8 +166,8 @@ function closeLoginDialog() {
 }
 async function openCracker() {
   if (!slot.value?.connected) { error.value = 'Connect to a server before opening its login.'; return }
-  const product = slot.value.running_apps.find(app => app.id === 'cracker')?.product_id || slot.value.installed_software.find(id => slot.value.catalog.some(item => item.id === id && item.kind === 'cracker'))
-  if (product && await launchApplication(product, true, slot.value.id)) loginDialog.value = true
+  if (!slot.value.catalog.some(item => item.kind === 'cracker' && slot.value.installed_software.includes(item.id))) { error.value = 'Buy a Lockpick license before opening the decoder.'; return }
+  loginDialog.value = true
 }
 watch(() => `${slot.value?.id}:${slot.value?.created_at}:${slot.value?.connected}`, () => { loginDialog.value = false })
 async function jumpBackdoor(target) {
@@ -168,7 +183,7 @@ async function contractAction(action, job) {
   })
 }
 async function trade(action, productId) {
-  await act(async () => { const product = [...slot.value.catalog, ...slot.value.black_market_catalog].find(item => item.id === productId); updateSlot(await api(`slots/${slot.value.id}/loadout/`, { action, product_id: productId })); if (action === 'buy' && product?.category === 'software') { buildMode.value = 'software'; buildProduct.value = product } else if (action === 'equip' && product) { buildMode.value = 'hardware'; buildProduct.value = product }; notice.value = action === 'buy' ? (product?.kind === 'cleaner' ? 'Logcleaner installed in the primary terminal.' : 'Purchase complete. Hardware must be fitted; software is available in Applications.') : action === 'sell' ? 'Product sold. Payment recorded in your ledger.' : 'Component fitted.' })
+  await act(async () => { const product = [...slot.value.catalog, ...slot.value.black_market_catalog].find(item => item.id === productId); updateSlot(await api(`slots/${slot.value.id}/loadout/`, { action, product_id: productId })); if (action === 'buy' && product?.category === 'software') { buildMode.value = 'software'; buildProduct.value = product } else if (action === 'equip' && product) { buildMode.value = 'hardware'; buildProduct.value = product }; notice.value = action === 'buy' ? (product?.kind === 'cleaner' ? 'Logcleaner installed in the primary terminal.' : 'Purchase complete. Hardware must be fitted; software applets are ready in the primary terminal.') : action === 'sell' ? 'Product sold. Payment recorded in your ledger.' : 'Component fitted.' })
 }
 async function saveRoute(nodes) {
   await act(async () => { updateSlot(await api(`slots/${slot.value.id}/route/`, { nodes })); notice.value = 'Proxy chain committed. Connection leases are charged when dialing a target.' })
@@ -184,7 +199,7 @@ async function restartRunner() {
 }
 function openSaves() { act(async () => { await loadSaves(); page.value = 'saves' }) }
 async function refreshTrace() {
-  if (!slot.value || (!slot.value.connected && !slot.value.ransomware_ops.length) || busy.value || polling) return
+  if (!slot.value || (!slot.value.connected && !slot.value.ransomware_ops.length && !slot.value.broker_next_at && page.value !== 'broker') || busy.value || polling) return
   polling = true
   const marker = revision, id = slot.value.id
   try { const result = await api(`slots/${id}/`); if (revision === marker && !busy.value && slot.value?.id === id) updateSlot(result) } catch { /* commands report actionable connection errors */ } finally { polling = false }
@@ -201,7 +216,7 @@ onUnmounted(() => { clearInterval(clock); clearInterval(poller) })
   <div class="app-shell" :inert="loginDialog || !!buildProduct">
     <aside class="sidebar">
       <a class="brand" href="#" @click.prevent="page = 'overview'" aria-label="Netrunner home"><span class="brand-icon"><Terminal :size="23" /></span><span>netrunner<span class="brand-dot">_</span><small>INDEPENDENT NETWORK ACCESS</small></span></a>
-      <div class="workspace-label">WORKSPACE <span>V.0.12</span></div>
+      <div class="workspace-label">WORKSPACE <span>V.0.13</span></div>
       <nav aria-label="Main navigation">
         <button v-for="item in nav" :key="item.id" :aria-label="item.label" :class="['nav-item', { active: page === item.id }]" @click="navigate(item)" :disabled="!slot || busy" :aria-current="page === item.id ? 'page' : undefined"><component :is="item.icon" :size="18" /><span>{{ item.label }}</span><span v-if="item.id === 'broker' && slot" class="nav-count">{{ slot.contracts.length }}</span><span v-if="item.id === 'terminal' && slot?.active_contract" class="live-dot"></span></button>
       </nav>
@@ -244,16 +259,15 @@ onUnmounted(() => { clearInterval(clock); clearInterval(poller) })
             <div class="desktop-grid"><section class="panel machine-panel"><div class="panel-title"><span><Cpu :size="16" /> YOUR MACHINE</span><span class="panel-meta">{{ slot.equipment.gateway.name.toUpperCase() }}</span></div><div class="machine-visual"><div class="machine-orbit"></div><Cpu :size="65" :stroke-width="1" /><span>{{ slot.equipment.gateway.name }}</span><small>{{ slot.equipment.gateway.hops }} PROXY HOPS / {{ slot.equipment.gateway.stealth }} STEALTH</small></div><div class="machine-components"><div v-for="(item, kind) in slot.equipment" :key="kind"><span>{{ kind.toUpperCase() }}</span><strong>{{ item.name }}</strong></div></div></section><section class="panel desktop-brief"><div class="panel-title"><span><BriefcaseBusiness :size="16" /> ASSIGNMENT DESK</span><span class="panel-meta">{{ slot.active_contract ? 'RESERVED' : 'NO ASSIGNMENT' }}</span></div><div class="briefing-body"><span class="micro">{{ slot.active_contract ? `CONTRACT ${slot.active_contract.id}` : '// INDEPENDENT OPERATOR' }}</span><h2>{{ slot.active_contract?.title || 'No handrails.\nNo shortcuts.' }}</h2><p>{{ slot.active_contract?.description || 'The broker supplies objectives. Your applications supply capabilities. You choose the tools, the route, and the risk.' }}</p><div v-if="slot.active_contract" class="brief-target">{{ slot.active_contract.target }}</div><div class="desk-facts"><span>{{ slot.installed_software.length }} TOOL LICENSES</span><span>{{ slot.proxy_route.length }} COMMITTED PROXIES</span><span>{{ slot.contracts.filter(job => !cooled(job)).length }} AVAILABLE JOBS</span></div></div></section></div>
             <section class="panel recovery-panel"><div><span class="micro">RUNNER RECOVERY</span><p>New jobs return over time. Sell spare equipment if funds are tight. Restarting erases this slot's progress and restores starter funding.</p></div><button class="text-link danger-text" @click="restartConfirmation = ''; restartOpen = true">Restart this runner</button></section>
           </template>
-          <AppLauncher v-else-if="page === 'launcher'" :slot="slot" :busy="busy" @launch="launchApplication" @close="closeApplication" />
+          <AppLauncher v-else-if="page === 'launcher'" :slot="slot" :busy="busy" @launch="launchApplication" @close="closeApplication" @use="useApplet" />
           <NetworkMap v-else-if="page === 'atlas'" :slot="slot" :busy="busy" @save="saveRoute" @directory="editDirectory" />
           <ServerHistory v-else-if="page === 'history'" :key="`${slot.id}:${slot.created_at}`" :slot-id="slot.id" :api="api" :remote-target="slot.remote_target" />
           <ExchangeView v-else-if="page === 'exchange'" :slot="slot" :busy="busy" @trade="trade" />
           <BrokerView v-else-if="page === 'broker'" :slot="slot" :busy="busy" :now="now" :offset="serverOffset" :ranks="ranks" @action="contractAction" />
           <template v-else-if="page === 'console' && currentProcess">
-            <div class="eyebrow">OPERATIONS / {{ activeConsole.toUpperCase() }}</div><div class="page-heading"><div><h1>{{ currentProcess.name }}<span>_</span></h1><p>{{ currentProcess.ram }} GB allocated. {{ activeConsole === 'cracker' ? 'Graphical password breaker.' : "Commands execute inside this application’s console." }}</p></div><span class="badge">{{ slot.connected ? 'REMOTE SESSION' : 'LOCAL SESSION' }}</span></div>
-            <PasswordBreaker v-if="activeConsole === 'cracker'" :slot="slot" :busy="busy" :action="breakerAction" />
+            <div class="eyebrow">OPERATIONS / {{ activeConsole.toUpperCase() }}</div><div class="page-heading"><div><h1>{{ currentProcess.name }}<span>_</span></h1><p>{{ currentProcess.ram }} GB allocated. Commands run inside this terminal.</p></div><span class="badge">{{ slot.connected ? 'REMOTE SESSION' : 'LOCAL SESSION' }}</span></div>
             <ServerLogin v-if="activeConsole === 'terminal'" :slot="slot" :busy="busy" @open-cracker="openCracker" />
-            <TerminalConsole v-if="activeConsole !== 'cracker'" :slot="slot" :application="activeConsole" :busy="busy" :send="sendCommand" @open-cracker="openCracker" />
+            <TerminalConsole :slot="slot" :application="activeConsole" :busy="busy" :send="sendCommand" @open-cracker="openCracker" />
           </template>
           <template v-else-if="page === 'blackmarket' && slot.market_unlocked">
             <BlackMarket :slot="slot" :busy="busy" @trade="trade" />

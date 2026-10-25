@@ -67,7 +67,43 @@ def hardware(slot):
 
 
 def ram_used(slot):
-    return sum(BUILTIN_APPS[key]['ram'] if key in BUILTIN_APPS else SOFTWARE[value]['ram'] for key, value in slot.running_apps.items())
+    processes = sum(BUILTIN_APPS[key]['ram'] for key in slot.running_apps if key in BUILTIN_APPS)
+    attempt = slot.mission_state.get('password_break')
+    return processes + (SOFTWARE[attempt['product_id']]['ram'] if attempt else 0)
+
+
+def choose_tool(slot, kind, product_id=None, require_ram=True):
+    names = {'mapper':'Cartograph', 'cracker':'Lockpick', 'decryptor':'Rosetta', 'cleaner':'Logcleaner', 'monitor':'Tripwire', 'rootkit':'Wraith', 'ransomware':'Eclipse'}
+    choices = [SOFTWARE[key] for key in slot.installed_software if key in SOFTWARE and SOFTWARE[key]['kind'] == kind]
+    selected = product_id or slot.applet_preferences.get(kind)
+    if selected:
+        choices = [item for item in choices if item['id'] == selected]
+    if not choices:
+        raise GameError(f'An owned {names[kind]} license is required.')
+    if require_ram:
+        choices = [item for item in choices if item['ram'] <= hardware(slot)['memory']['ram'] - ram_used(slot)]
+        if not choices:
+            raise GameError(f'Not enough free RAM for {names[kind]}. Cancel an active decoder or select a Micro license.')
+    return max(choices, key=lambda item: (item['power'], item['speed']))
+
+
+def select_applet(slot, product_id):
+    if product_id not in slot.installed_software or product_id not in SOFTWARE:
+        raise GameError('Select an owned software license.')
+    kind = SOFTWARE[product_id]['kind']
+    if kind == 'cracker' and slot.mission_state.get('password_break') and slot.mission_state['password_break']['product_id'] != product_id:
+        from .passwords import cancel_break
+        cancel_break(slot)
+    if kind == 'cracker':
+        slot.mission_state['password_tool'] = product_id
+    slot.applet_preferences = {**slot.applet_preferences, kind: product_id}
+
+
+def monitor_tool(slot):
+    try:
+        return choose_tool(slot, 'monitor', require_ram=False)
+    except GameError:
+        return None
 
 
 def route_stats(slot, route=None, target=None):
@@ -112,16 +148,18 @@ def fail(slot, reason):
     contract_failure = bool(slot.active_contract)
     fine = min(slot.balance, 90 + job['rank'] * 80)
     if fine:
-        transact(slot, -fine, f'Contract failure // {public_code(slot.active_contract)}' if slot.active_contract else f'Intrusion failure // {job["target"]}')
+        transact(slot, -fine, f'Contract failure // {public_code(slot.active_contract, slot)}' if slot.active_contract else f'Intrusion failure // {job["target"]}')
     slot.reputation = max(0, slot.reputation - 60)
     if slot.active_contract:
         slot.contract_cooldowns = {**slot.contract_cooldowns, slot.active_contract: (timezone.now() + timedelta(seconds=FAILURE_COOLDOWN)).isoformat()}
+    from .broker import delay_replacement
+    delay_replacement(slot, slot.active_contract)
     slot.active_contract = ''
     slot.remote_host = {}
     slot.mission_started = None
     slot.mission_state = {}
     outcome = 'Contract lost.' if contract_failure else 'Remote link lost.'
-    refresh = ' Broker refresh: 10 minutes.' if contract_failure else ''
+    refresh = ' Broker sourcing updated; this assignment will not return.' if contract_failure else ''
     log(slot, 'terminal', f'{reason}\n{outcome} Fine {fine} CPH. Reputation −60 (floor 0).{refresh}')
 
 
@@ -134,6 +172,8 @@ def settle(slot):
         fail(slot, 'TRACE COMPLETE. Your gateway was identified.')
         slot.save()
     settle_world(slot)
+    from .broker import settle_broker
+    settle_broker(slot)
 
 
 def validate_route(slot, route):
@@ -175,8 +215,10 @@ def launch(slot, product_id):
         app = SOFTWARE[product_id]['kind']
     else:
         raise GameError('This application is not installed.')
-    if app == 'cleaner':
-        raise GameError('Logcleaner is built into the local terminal. Run logcleaner there.')
+    if product_id in {'bank','broker','market'}:
+        raise GameError('Open this online service from its sidebar page.')
+    if product_id not in BUILTIN_APPS:
+        raise GameError('Software is a terminal applet. Select its license and use the primary terminal.')
     previous = dict(slot.running_apps)
     slot.running_apps = {**previous, app: product_id}
     if ram_used(slot) > hardware(slot)['memory']['ram']:
@@ -210,6 +252,12 @@ def trade(slot, action, product_id):
         if product_id in slot.equipment.values() or product_id in slot.running_apps.values():
             raise GameError('Unequip or close this product before selling it.')
         owned.remove(product_id)
+        if product_id in SOFTWARE:
+            kind = item['kind']
+            if slot.applet_preferences.get(kind) == product_id:
+                slot.applet_preferences = {key:value for key,value in slot.applet_preferences.items() if key != kind}
+            if slot.mission_state.get('password_tool') == product_id:
+                slot.mission_state.pop('password_tool', None)
         transact(slot, item['price'] // 2, f'Resale // {item["name"]}')
     elif action == 'equip':
         if product_id not in HARDWARE or product_id not in owned:
@@ -227,12 +275,12 @@ def trade(slot, action, product_id):
 
 
 MANUALS = {
-    'terminal': 'LOCAL SHELL\nhelp — application manual\nrumors — intercepted hidden-service invitation\njump <host> — use an installed Wraith backdoor\napps — running processes and RAM\ncontracts — broker listings\naccept <contract-id> — reserve by the numeric ID in contracts (0–255)\nbrief — read the accepted brief\nroute — inspect the committed proxy chain\nconnect <host> — dial a fictional target\nscan <host> — scan with owned Cartograph software\nlogcleaner [license-id] — erase remote logs with an owned Logcleaner license\nlockpick — open the server login dialog\nstatus — gateway status\nhistory — recent operator journal for this target\ndecrypt <local-file> — decrypt a local archive with owned Rosetta software while disconnected\nls — list local files when disconnected; remote files when logged in\nget <file> — copy a readable file to local storage\nrm <file> — remove a local file when disconnected; a remote file when logged in\ndisconnect — end the remote session\nsubmit — deliver evidence to the broker\nabort — abandon the contract (fine and reputation loss)\nclear — clear local console output',
+    'terminal': 'LOCAL SHELL\napplets — list owned terminal software\nuse <license-id> — select an applet version\ntrace — licensed Tripwire telemetry\ninstall — install owned Wraith rootkit\ndeploy <host> — deploy owned Eclipse ransomware\nhelp — application manual\nrumors — intercepted hidden-service invitation\njump <host> — use an installed Wraith backdoor\napps — running processes and RAM\ncontracts — broker listings\naccept <contract-id> — reserve by the numeric ID in contracts (0–255)\nbrief — read the accepted brief\nroute — inspect the committed proxy chain\nconnect <host> — dial a fictional target\nscan <host> — scan with owned Cartograph software\nlogcleaner [license-id] — erase remote logs with an owned Logcleaner license\nlockpick — open the server login dialog\nstatus — gateway status\nhistory — recent operator journal for this target\ndecrypt <local-file> — decrypt a local archive with owned Rosetta software while disconnected\nls — list local files when disconnected; remote files when logged in\nget <file> — copy a readable file to local storage\nrm <file> — remove a local file when disconnected; a remote file when logged in\ndisconnect — end the remote session\nsubmit — deliver evidence to the broker\nabort — abandon the contract (fine and reputation loss)\nclear — clear local console output',
     'mapper': 'CARTOGRAPH\nscan <host> — inspect a fictional host and its services\nCosts 1 + tool tier CPH. Scan quality depends on tool capability.',
-    'cracker': 'LOCKPICK\nOpen the graphical password breaker from Applications. Connect to a server login and scan its authentication service first.',
+    'cracker': 'LOCKPICK\nUse login in the primary terminal to open the password decoder. Connect to a server login and scan its authentication service first.',
     'decryptor': 'ROSETTA\ndecrypt <file> — decode an encrypted remote archive\nRequires file access and a sufficient decryption engine.',
     'cleaner': 'LOGCLEANER\nRun logcleaner from the local terminal with an owned license.',
-    'monitor': 'TRIPWIRE\ntrace — inspect the active trace\nThe monitor must remain running to show a live countdown.',
+    'monitor': 'TRIPWIRE\ntrace — inspect the active trace\nAn owned capable license decodes the embedded trace countdown; no separate process is needed.',
     'rootkit': 'WRAITH // EPIC\ninstall — persist a backdoor on the currently mounted server. Clean initial logs before leaving.\nFuture jump <host> connections bypass proxies and logs.',
     'ransomware': 'ECLIPSE // EPIC\ndeploy <host> — install on the currently mounted amber non-contract server. Maximum 3 instances; payout after 120 seconds; each instance then removes itself.',
     'bank': 'CIPHER BANK\nbalance — account balance\nhistory — latest 15 ledger entries',
@@ -242,9 +290,13 @@ MANUALS = {
 def reserve(slot, contract_id):
     if slot.active_contract or slot.mission_started:
         raise GameError('An assignment or remote session is already open.')
-    mapping = codes()
-    key = next((key for key, code in mapping.items() if str(code) == contract_id), None)
-    job = get_contract(key)
+    from .broker import offered_jobs
+    mapping = codes(slot)
+    eligible = offered_jobs(slot)
+    key = next((job['id'] for job in eligible if str(mapping[job['id']]) == contract_id), None)
+    if key is None:
+        key = next((key for key, code in mapping.items() if str(code) == contract_id and key not in slot.broker_consumed), None)
+    job = get_contract(key, slot)
     if not job:
         raise GameError(f'Unknown contract ID {contract_id!r}. Run contracts and use its numeric ID (0–255).')
     if abs(job['rank'] - slot.rank) > 1:
@@ -253,15 +305,17 @@ def reserve(slot, contract_id):
     ready = available_at(slot, key)
     if ready and ready > timezone.now():
         raise GameError('The broker is still sourcing a replacement assignment. Check its availability time.')
+    from .broker import consume
+    consume(slot, job)
     slot.active_contract = key
     slot.remote_host = {}
     slot.mission_state = {}
     slot.mission_started = None
-    return f'Reservation confirmed: {public_code(job["id"])}.\n{job["description"]}\nTarget: {job["target"]}. Payment: {job["reward"]} CPH.'
+    return f'Reservation confirmed: {public_code(job["id"], slot)}.\n{job["description"]}\nTarget: {job["target"]}. Payment: {job["reward"]} CPH.'
 
 
-def _tool_work(slot, app, base):
-    tool = SOFTWARE[slot.running_apps[app]]
+def _tool_work(slot, app, base, tool=None):
+    tool = tool or choose_tool(slot, app)
     cost = tool['tier'] + 1
     if slot.balance < cost:
         return False, 'Insufficient CPH for tool compute time. No operation was performed.'
@@ -272,7 +326,7 @@ def _tool_work(slot, app, base):
 
 
 def execute(slot, app, raw):
-    if app not in slot.running_apps or app not in MANUALS:
+    if (app not in slot.running_apps and app != 'bank') or app not in MANUALS:
         raise GameError('Launch this application before using its console.')
     try:
         parts = shlex.split(raw)
@@ -291,6 +345,10 @@ def execute(slot, app, raw):
     if verb == 'help' and not args:
         log(slot, app, MANUALS[app])
         return
+    if verb == 'help' and len(args) == 1 and app == 'terminal':
+        key = {'scan':'mapper','login':'cracker','decrypt':'decryptor','logcleaner':'cleaner','trace':'monitor','install':'rootkit','deploy':'ransomware'}.get(args[0], args[0])
+        log(slot, app, MANUALS.get(key, 'Unknown applet. Use help for the command list.'))
+        return
     job = current_target(slot)
     state = slot.mission_state
     result = ''
@@ -304,59 +362,8 @@ def execute(slot, app, raw):
                 result = 'Unknown bank command. Read help for the bank manual.'
         elif app == 'terminal':
             result = _shell(slot, verb, args, job)
-        elif app == 'decryptor' and not slot.mission_started:
-            if verb != 'decrypt' or len(args) != 1:
-                raise GameError('Use decrypt <local-file>.')
-            result = decrypt_local(slot, args[0])
-        elif app == 'mapper':
-            if verb != 'scan' or len(args) != 1:
-                raise GameError('Unknown command or arguments for this application. Read help for its manual.')
-            result = scan_target(slot, args[0])
-        elif app == 'cracker':
-            if verb != 'crack' or len(args) != 1:
-                raise GameError('Open the graphical Lockpick password breaker.')
-            from .passwords import start_break
-            start_break(slot, args[0])
-            return
-        elif app == 'rootkit':
-            from .operations import install_rootkit
-            if verb != 'install' or args:
-                raise GameError('Use install while connected to a mounted server.')
-            result = install_rootkit(slot)
-        elif app == 'ransomware':
-            from .operations import deploy_ransomware
-            if verb != 'deploy' or len(args) != 1:
-                raise GameError('Use deploy <host> on an amber opportunity server.')
-            result = deploy_ransomware(slot, args[0])
         else:
-            usages = {'decryptor': ('decrypt', 1), 'monitor': ('trace', 0)}
-            expected, count = usages[app]
-            if verb != expected or len(args) != count:
-                raise GameError('Unknown command or arguments for this application. Read help for its manual.')
-            if app == 'monitor':
-                if trace_remaining(slot) is not None and SOFTWARE[slot.running_apps[app]]['power'] < job['security']:
-                    result = 'Trace encrypted: this monitor cannot decode the target security class.'
-                elif slot.remote_host.get('_backdoor'):
-                    result = 'Wraith link: remote logging suppressed. No active trace.'
-                else:
-                    remaining = trace_remaining(slot)
-                    result = f'Trace remaining: {remaining} seconds.' if remaining is not None else 'No active remote trace.'
-            else:
-                require_login(slot)
-                charged, tool = _tool_work(slot, app, 18)
-                if not charged:
-                    raise GameError(tool)
-                state['dirty'] = True
-                if tool['power'] < job['security']:
-                    raise GameError(f'Tool capability {tool["power"]} is insufficient for security class {job["security"]}. Operation failed.')
-                if app == 'decryptor':
-                    if not state.get('access') or args[0] != job['file'] or not job.get('file_present', True):
-                        raise GameError('Archive unavailable or access denied.')
-                    if not job['encrypted']:
-                        raise GameError('This file is not encrypted.')
-                    state.update(decrypted=True, dirty=True)
-                    record_action(slot, job, 'file_decrypted', f'{job["file"]} decrypted on the remote filesystem.', decrypt=True)
-                    result = f'{job["file"]}: decrypted. Checksum intact.'
+            raise GameError('Use the primary terminal for software applets.')
     except GameError as exc:
         result = str(exc)
         if slot.mission_started:
@@ -373,26 +380,12 @@ def require_login(slot):
         raise GameError('You are not logged in. Connect to a server and log in first.')
 
 
-def scan_target(slot, address, integrated=False):
+def scan_target(slot, address):
     from .operations import find_target
     target = current_target(slot) if slot.mission_started else effective_target(slot, find_target(slot, address))
     if not target or address != target['target']:
         raise GameError('Host not present in your reserved network directory.')
-    previous = slot.running_apps
-    if integrated and 'mapper' not in previous:
-        licenses = [SOFTWARE[key] for key in slot.installed_software if key in SOFTWARE and SOFTWARE[key]['kind'] == 'mapper']
-        if not licenses:
-            raise GameError('An owned Cartograph license is required to scan from the terminal.')
-        free_ram = hardware(slot)['memory']['ram'] - ram_used(slot)
-        licenses = [tool for tool in licenses if tool['ram'] <= free_ram]
-        if not licenses:
-            raise GameError('Not enough free RAM for Cartograph. Close a tool or use a Micro license.')
-        tool = max(licenses, key=lambda tool: (tool['power'], tool['speed']))
-        slot.running_apps = {**previous, 'mapper': tool['id']}
-    try:
-        charged, tool = _tool_work(slot, 'mapper', 8)
-    finally:
-        slot.running_apps = previous
+    charged, tool = _tool_work(slot, 'mapper', 8)
     if not charged:
         raise GameError(tool)
     state = slot.mission_state
@@ -410,22 +403,8 @@ def scan_target(slot, address, integrated=False):
 
 def clean_logs(slot, license_id=None):
     require_login(slot)
-    choices = [SOFTWARE[key] for key in slot.installed_software if key in SOFTWARE and SOFTWARE[key]['kind'] == 'cleaner']
-    if license_id:
-        choices = [tool for tool in choices if tool['id'] == license_id]
-    if not choices:
-        raise GameError('An owned Logcleaner license is required. Buy one at the exchange.')
-    free_ram = hardware(slot)['memory']['ram'] - ram_used(slot)
-    choices = [tool for tool in choices if tool['ram'] <= free_ram]
-    if not choices:
-        raise GameError('Not enough free RAM for Logcleaner. Close a tool or choose a Micro license.')
-    tool = max(choices, key=lambda tool: (tool['power'], tool['speed']))
-    previous = slot.running_apps
-    try:
-        slot.running_apps = {**previous, 'cleaner': tool['id']}
-        charged, result = _tool_work(slot, 'cleaner', 14)
-    finally:
-        slot.running_apps = previous
+    tool = choose_tool(slot, 'cleaner', license_id)
+    charged, result = _tool_work(slot, 'cleaner', 14, tool)
     if not charged:
         raise GameError(result)
     job = current_target(slot)
@@ -436,28 +415,28 @@ def clean_logs(slot, license_id=None):
     return f'{tool["name"]}: Remote access logs erased.'
 
 
-def decrypt_local(slot, name, integrated=False):
+def decrypt_local(slot, name):
     if slot.mission_started:
-        raise GameError('Disconnect before decrypting a local file. Rosetta can also decrypt remote files in its own console.')
+        require_login(slot)
+        target = current_target(slot)
+        if name != target['file'] or not target.get('file_present', True):
+            raise GameError('Archive unavailable or access denied.')
+        if not target['encrypted']:
+            raise GameError('This file is not encrypted.')
+        charged, tool = _tool_work(slot, 'decryptor', 18)
+        if not charged:
+            raise GameError(tool)
+        if tool['power'] < target['security']:
+            raise GameError('Rosetta capability is insufficient for this archive.')
+        slot.mission_state.update(decrypted=True, dirty=True)
+        record_action(slot, target, 'file_decrypted', f'{name} decrypted on the remote filesystem.', decrypt=True)
+        return f'{name}: decrypted. Checksum intact.'
     entry = next((entry for entry in slot.local_files if entry['name'] == name), None)
     if not entry:
         raise GameError('Local file not found.')
     if not entry.get('encrypted'):
         raise GameError('This local file is not encrypted.')
-    previous = slot.running_apps
-    if integrated and 'decryptor' not in previous:
-        licenses = [SOFTWARE[key] for key in slot.installed_software if key in SOFTWARE and SOFTWARE[key]['kind'] == 'decryptor']
-        if not licenses:
-            raise GameError('An owned Rosetta license is required for local decryption.')
-        free_ram = hardware(slot)['memory']['ram'] - ram_used(slot)
-        licenses = [tool for tool in licenses if tool['ram'] <= free_ram]
-        if not licenses:
-            raise GameError('Not enough free RAM for Rosetta. Close a tool or use a Micro license.')
-        slot.running_apps = {**previous, 'decryptor': max(licenses, key=lambda tool: (tool['power'], tool['speed']))['id']}
-    try:
-        charged, tool = _tool_work(slot, 'decryptor', 18)
-    finally:
-        slot.running_apps = previous
+    charged, tool = _tool_work(slot, 'decryptor', 18)
     if not charged:
         raise GameError(tool)
     if tool['power'] < entry.get('security', 1):
@@ -469,14 +448,45 @@ def decrypt_local(slot, name, integrated=False):
 
 def _shell(slot, verb, args, job):
     arity = {'history': 0, 'jump': 1, 'rumors': 0, 'apps': 0, 'contracts': 0, 'accept': 1, 'route': 0, 'status': 0, 'brief': 0, 'abort': 0, 'connect': 1, 'submit': 0, 'disconnect': 0, 'ls': 0, 'get': 1, 'rm': 1}
+    if verb == 'use':
+        if len(args) != 1:
+            raise GameError('Use use <license-id>.')
+        select_applet(slot, args[0])
+        return f'{SOFTWARE[args[0]]["name"]} selected for the primary terminal.'
+    if verb == 'applets':
+        return '\n'.join(f'{item["id"]}: {item["name"]}' for item in SOFTWARE.values() if item['id'] in slot.installed_software)
+    if verb == 'crack':
+        if len(args) != 1:
+            raise GameError('Use login to open the password decoder.')
+        from .passwords import start_break
+        start_break(slot, args[0])
+        return 'Password breaker started. Use login to view its progress.'
+    if verb == 'trace':
+        tool = choose_tool(slot, 'monitor', require_ram=False)
+        target = current_target(slot)
+        if slot.remote_host.get('_backdoor'):
+            return 'Wraith link: remote logging suppressed. No active trace.'
+        if trace_remaining(slot) is None:
+            return 'No active remote trace.'
+        if tool['power'] < target['security']:
+            return 'Trace encrypted: this monitor cannot decode the target security class.'
+        return f'Trace remaining: {trace_remaining(slot)} seconds.'
+    if verb == 'install' and not args:
+        choose_tool(slot, 'rootkit')
+        from .operations import install_rootkit
+        return install_rootkit(slot)
+    if verb == 'deploy' and len(args) == 1:
+        choose_tool(slot, 'ransomware')
+        from .operations import deploy_ransomware
+        return deploy_ransomware(slot, args[0])
     if verb == 'decrypt':
         if len(args) != 1:
             raise GameError('Use decrypt <local-file>.')
-        return decrypt_local(slot, args[0], integrated=True)
+        return decrypt_local(slot, args[0])
     if verb == 'scan':
         if len(args) != 1:
             raise GameError('Use scan <host>.')
-        return scan_target(slot, args[0], integrated=True)
+        return scan_target(slot, args[0])
     if verb == 'logcleaner':
         if len(args) > 1:
             raise GameError('Use logcleaner [license-id].')
@@ -497,8 +507,9 @@ def _shell(slot, verb, args, job):
     if verb == 'apps' and not args:
         return '\n'.join(f'{key}: {BUILTIN_APPS[value]["name"] if value in BUILTIN_APPS else SOFTWARE[value]["name"]}' for key, value in slot.running_apps.items()) + f'\nRAM: {ram_used(slot)} / {hardware(slot)["memory"]["ram"]} GB'
     if verb == 'contracts' and not args:
-        mapping = codes()
-        return '\n'.join(f'ID {mapping[c["id"]]}  [{RANKS[c["rank"]]}]  {c["title"]}  {c["reward"]} CPH  {"cooling down" if available_at(slot, c["id"]) and available_at(slot, c["id"]) > timezone.now() else "available"}' for c in all_contracts() if abs(c['rank'] - slot.rank) <= 1)
+        from .broker import offered_jobs
+        mapping = codes(slot)
+        return '\n'.join(f'ID {mapping[c["id"]]}  [{RANKS[c["rank"]]}]  {c["title"]}  {c["reward"]} CPH' for c in offered_jobs(slot)) or 'No contracts available. The broker is sourcing new assignments.'
     if verb == 'accept' and len(args) == 1:
         return reserve(slot, args[0])
     if verb == 'route' and not args:
@@ -514,7 +525,7 @@ def _shell(slot, verb, args, job):
     if verb == 'brief' and not args:
         if not slot.active_contract:
             raise GameError('No reserved contract.')
-        return f'{public_code(job["id"])} // {job["description"]}\nTarget: {job["target"]}. Reward: {job["reward"]} CPH.'
+        return f'{public_code(job["id"], slot)} // {job["description"]}\nTarget: {job["target"]}. Reward: {job["reward"]} CPH.'
     if verb == 'abort' and not args:
         if not slot.active_contract:
             raise GameError('No reserved contract. Use disconnect to leave this server.')
@@ -531,14 +542,14 @@ def _shell(slot, verb, args, job):
         fulfilled = (state.get('recovered') and local_copy) if job['objective'] == 'retrieve' else state.get('deleted')
         if not fulfilled or not state.get('clean_exit'):
             raise GameError('Broker rejected delivery: objective or clean exit evidence missing.')
-        transact(slot, job['reward'], f'Contract payment // {public_code(job["id"])}')
+        transact(slot, job['reward'], f'Contract payment // {public_code(job["id"], slot)}')
         slot.reputation += job['reputation']
         slot.completed += 1
         record_contract(slot, job, timezone.now() + timedelta(seconds=SUCCESS_COOLDOWN))
         slot.contract_cooldowns = {**slot.contract_cooldowns, job['id']: (timezone.now() + timedelta(seconds=SUCCESS_COOLDOWN)).isoformat()}
         slot.active_contract = ''
         slot.mission_state = {}
-        return f'Delivery verified. +{job["reward"]} CPH / +{job["reputation"]} reputation.\nReplacement assignment available in 5 minutes.'
+        return f'Delivery verified. +{job["reward"]} CPH / +{job["reputation"]} reputation.\nThe broker will publish a new assignment after its sourcing delay.'
     if not slot.mission_started:
         raise GameError('No remote connection.')
     if verb == 'disconnect' and not args:

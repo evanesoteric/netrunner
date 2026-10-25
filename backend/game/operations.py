@@ -11,13 +11,16 @@ RANSOM_SECONDS = 120
 
 
 def find_target(slot, address):
-    job = get_contract(slot.active_contract)
+    job = get_contract(slot.active_contract, slot)
     if job:
         if address != job['target']:
             raise GameError('Finish or abort the reserved assignment before visiting another target.')
         return job
     server = next((server for server in all_servers(slot) if server['address'] == address and not server.get('market')), None)
     if not server:
+        known = slot.server_states.filter(address=address).first()
+        if known and known.descriptor.get('rank', 0) <= slot.rank + 1:
+            return {**known.descriptor, 'objective':'explore'}
         raise GameError('Host not present in your network directory.')
     if server['rank'] > slot.rank:
         raise GameError('This server exceeds your rank clearance.')
@@ -41,7 +44,7 @@ def connect_target(slot, address, backdoor=False):
         target = next((entry for entry in slot.backdoors if entry['target'] == address), None)
         if not target:
             raise GameError('No installed backdoor on that server.')
-        job = get_contract(slot.active_contract)
+        job = get_contract(slot.active_contract, slot)
         if job and job['target'] != address:
             raise GameError('Finish or abort the reserved assignment before jumping to another target.')
         target = dict(job or target)
@@ -115,7 +118,7 @@ def settle_ransomware(slot):
     for entry in slot.ransomware_ops:
         if parse_datetime(entry['due_at']) <= timezone.now():
             transact(slot, entry['reward'], f'Ransomware payout // {entry["target"]}')
-            log(slot, 'ransomware', f'Ransomware operation complete on {entry["target"]}, you earned {entry["reward"]} CPH. Instance removed.')
+            log(slot, 'terminal', f'Ransomware operation complete on {entry["target"]}, you earned {entry["reward"]} CPH. Instance removed.')
             server = slot.server_states.filter(address=entry['target']).first()
             if server:
                 event(server, 'ransomware_completed', f'Eclipse operation paid {entry["reward"]} CPH; instance removed.')

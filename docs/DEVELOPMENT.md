@@ -205,6 +205,8 @@ The offline generator's `--service` option accepts `ssh`, `http`, `rdp`, `wordpr
 
 ### Authoring mission file placement
 
+Follow the [offline content generation setup](#offline-content-generation) above before running these examples.
+
 Generated missions use mixed placement by default: roughly 70 percent at root and 30 percent in their service's normal directory. Background folders and files are automatic for generated contracts and directory servers. Use explicit options when authoring a particular mission:
 
 ```bash

@@ -92,5 +92,6 @@ The terminal is available from the top bar, with Tab completion and integrated `
 
 - [Gameplay and command reference](docs/GAMEPLAY.md)
 - [Development, database maintenance, and testing](docs/DEVELOPMENT.md)
+- [Create missions and directory servers](docs/DEVELOPMENT.md#offline-content-generation), including [mission file placement](docs/DEVELOPMENT.md#authoring-mission-file-placement)
 - [Release notes](docs/RELEASE_NOTES.md)
 - [Planned work](TODO.md) and [ideas](IDEAS.md)

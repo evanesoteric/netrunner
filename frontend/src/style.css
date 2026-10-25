@@ -40,3 +40,5 @@
 
 .broker-active{padding:20px;margin-bottom:18px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}.broker-active h2{font-size:16px}.broker-active code{font:10px var(--mono);color:#8ab997;overflow-wrap:anywhere}.broker-active .button{margin-left:auto;font-size:10px}
 .command-line input{scroll-margin-block:8px}
+
+.store-views{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:20px 0}.store-views p{font:10px/1.8 var(--mono);color:var(--muted);margin:0}.store-views button[aria-pressed=true]{border-color:#4b9a5b;color:#00ff00}.product-card .resale{width:100%;justify-content:center}.product-card .resale-reason{font:9px/1.8 var(--mono);margin:9px 0 0;flex:none;color:#8caa95}

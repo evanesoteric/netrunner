@@ -77,7 +77,7 @@ Stop with **Ctrl+C**, then `docker compose down`. Start again with `docker compo
 | Cipher bank | Check your balance and transaction history. |
 | Atlas network | Discover servers, manage map bookmarks, and build proxy routes. |
 | Applications | Open system pages and select owned applet licenses for the primary terminal. |
-| Hardware / software exchange | Buy, fit, and sell equipment; purchase software licenses. |
+| Store | Buy hardware and software; select applet licenses and sell old items. |
 | Field Notes | Keep a personal notebook for the current save. |
 | Server Histories | Review discovered servers and recorded activity. |
 | Save slots | Create, select, or restart one of three independent runners. |

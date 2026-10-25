@@ -64,7 +64,7 @@ BUILTIN_APPS = {
     'terminal': {'id': 'terminal', 'name': 'Local terminal', 'description': 'Shell, broker reservations, remote file access, and deliveries.', 'ram': 1, 'console': True},
     'atlas': {'id': 'atlas', 'name': 'Atlas routing desk', 'description': 'Manage your server directory and build an ordered proxy chain.', 'ram': 1, 'console': False},
     'broker': {'id': 'broker', 'name': 'Contract broker', 'description': 'Read briefs, target addresses, clearance, and availability.', 'ram': 0, 'console': False},
-    'market': {'id': 'market', 'name': 'Hardware & software exchange', 'description': 'Choose individual components and tool licenses.', 'ram': 0, 'console': False},
+    'market': {'id': 'market', 'name': 'Store', 'description': 'Hardware and software broker. Buy upgrades and sell spare equipment or applet licenses.', 'ram': 0, 'console': False},
     'bank': {'id': 'bank', 'name': 'Cipher bank', 'description': 'Your separate account terminal and ledger.', 'ram': 0, 'console': True},
 }
 # Coordinates are on the original Atlas SVG, not real infrastructure.

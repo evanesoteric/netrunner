@@ -24,7 +24,7 @@ For encrypted recovery, download the archive, clean the remote logs, and disconn
 
 ## Sidebar services and public proxies
 
-Atlas, Cipher bank, the contract broker, and Hardware & software open their full pages from the sidebar, including when leaving Workspace. These commercial services are page-only: they do not create workstation processes or Workspace panels.
+Atlas, Cipher bank, the contract broker, and Store open their full pages from the sidebar, including when leaving Workspace. These commercial services are page-only: they do not create workstation processes or Workspace panels.
 
 The directory includes 40 additional Ghost-accessible public servers: libraries, universities, transit networks, museums, civic archives, and telecommunications services. Add chosen servers to Atlas before routing through them. They have distinct fees, trace delays, and latency; gateway hop limits still apply. They are ordinary proxy/exploration servers, not ransomware opportunities.
 
@@ -101,3 +101,9 @@ Pending operations continue by server time while you are away. Payments settle o
 
 All tools operate on fictional game records. No payloads are generated, no host commands are run, and no external servers are contacted.
 
+
+## Store and resale
+
+Open **Store** in the sidebar to shop with the hardware and software broker. **Owned items** lists everything you can manage or resell across categories. Owned software has **Use in terminal** to select its license; hardware uses **Fit component**. These are different actions.
+
+All owned items, including starter licenses and starter hardware, can be sold for half their purchase price while disconnected. Fitted hardware requires a replacement first. Store cards show Sell with the return value and explain blocked sales. Selling a selected applet clears that preference; an owned fallback can then be selected or chosen automatically.

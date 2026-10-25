@@ -30,7 +30,7 @@ const nav = computed(() => [
   { id: 'broker', label: 'Contract broker', icon: BriefcaseBusiness },
   { id: 'bank', label: 'Cipher bank', icon: Landmark },
   { id: 'atlas', label: 'Atlas network', icon: Globe },
-  { id: 'exchange', label: 'Hardware & software', icon: Cpu },
+  { id: 'exchange', label: 'Store', icon: Cpu },
   { id: 'launcher', label: 'Applications', icon: Grid2X2 },
   { id: 'notes', label: 'Field Notes', icon: NotebookPen },
   { id: 'history', label: 'Server Histories', icon: Activity },
@@ -262,7 +262,7 @@ onUnmounted(() => { clearInterval(clock); clearInterval(poller) })
           <AppLauncher v-else-if="page === 'launcher'" :slot="slot" :busy="busy" @launch="launchApplication" @close="closeApplication" @use="useApplet" />
           <NetworkMap v-else-if="page === 'atlas'" :slot="slot" :busy="busy" @save="saveRoute" @directory="editDirectory" />
           <ServerHistory v-else-if="page === 'history'" :key="`${slot.id}:${slot.created_at}`" :slot-id="slot.id" :api="api" :remote-target="slot.remote_target" />
-          <ExchangeView v-else-if="page === 'exchange'" :slot="slot" :busy="busy" @trade="trade" />
+          <ExchangeView v-else-if="page === 'exchange'" :slot="slot" :busy="busy" @trade="trade" @use="useApplet" />
           <BrokerView v-else-if="page === 'broker'" :slot="slot" :busy="busy" :now="now" :offset="serverOffset" :ranks="ranks" @action="contractAction" />
           <template v-else-if="page === 'console' && currentProcess">
             <div class="eyebrow">OPERATIONS / {{ activeConsole.toUpperCase() }}</div><div class="page-heading"><div><h1>{{ currentProcess.name }}<span>_</span></h1><p>{{ currentProcess.ram }} GB allocated. Commands run inside this terminal.</p></div><span class="badge">{{ slot.connected ? 'REMOTE SESSION' : 'LOCAL SESSION' }}</span></div>

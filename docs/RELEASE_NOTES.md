@@ -2,6 +2,10 @@
 
 Historical feature and migration notes. See the [README](../README.md) for the current project overview and [development guide](DEVELOPMENT.md) for setup and maintenance.
 
+## v0.13.1 — Store and clear resale controls
+
+Renamed the shopping menu to Store, added an all-owned inventory view, and made resale buttons and blocking reasons explicit. Owned software can be selected directly in Store. Starter items remain resellable; fitted components require replacement and remote connections must be closed before trading.
+
 ## v0.13 — one terminal and fresh broker assignments
 
 All hacking software is now licensed terminal applets, including Cartograph, Rosetta, Tripwire, Wraith, Eclipse, and Lockpick's login modal. Atlas remains separate. Commercial services are page-only and no longer create processes or Workspace panels. Saved tool selections and useful logs migrate to the primary terminal; other save progress is retained.

@@ -1104,3 +1104,23 @@ test('IRC has a populated roster, timed chatter, red drops and persistent clear 
   await expect(page.locator('.page-heading .badge')).toContainText('1,110 CPH')
   expect(await log.locator('p').count()).toBeLessThanOrEqual(200)
 })
+
+test('IRC keeps advancing while the player uses another sidebar page', async ({ page }) => {
+  await register(page,'Background')
+  await sidebar(page,'IRC Underground')
+  const log=page.getByRole('log',{name:'IRC messages'})
+  await expect(log).toContainText('EXPLOIT DROP')
+  await page.getByRole('button',{name:'/clear',exact:true}).click()
+  await expect(log).toContainText('Scrollback cleared')
+  const count=await log.locator('p').count()
+  const slots=(await (await page.request.get('/api/slots/')).json()).slots
+  const background=page.waitForResponse(response=>response.url().endsWith(`/api/slots/${slots[0].id}/`) && response.request().method()==='GET',{timeout:16000})
+  await sidebar(page,'Desktop')
+  await expect(page.getByRole('heading',{name:'Welcome back, Background'})).toBeVisible()
+  expect((await background).ok()).toBeTruthy()
+  await expect(page.getByRole('heading',{name:'Welcome back, Background'})).toBeVisible()
+  await sidebar(page,'IRC Underground')
+  await expect.poll(()=>log.locator('p').count()).toBeGreaterThan(count)
+  await expect(log).toContainText('Scrollback cleared')
+  expect(await log.locator('p').count()).toBeLessThanOrEqual(200)
+})

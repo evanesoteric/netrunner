@@ -174,6 +174,8 @@ def settle(slot):
     settle_world(slot)
     from .broker import settle_broker
     settle_broker(slot)
+    from .exploits import settle_channel
+    settle_channel(slot)
 
 
 def validate_route(slot, route):

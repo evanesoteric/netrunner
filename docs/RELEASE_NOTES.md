@@ -2,6 +2,10 @@
 
 Historical feature and migration notes. See the [README](../README.md) for the current project overview and [development guide](DEVELOPMENT.md) for setup and maintenance.
 
+## v0.15.1 — continuous background IRC
+
+IRC advances through the shared game clock on every page, including an idle desktop. Long absences now fill the latest 200 messages instead of a small catch-up batch, with generation bounded to the history window. Reaching 200 keeps replacing the oldest lines; chat never stops or automatically wipes itself. `/clear` still preserves purchases and delivery cursors. Idle pages refresh every ten seconds without adding an IRC workstation process or consuming game RAM.
+
 ## v0.15 — populated IRC and bounded scrollback
 
 IRC Underground now has more than 60 ambient regulars, coherent three-person conversations every 10 seconds, an expandable roster, and red exploit drops every 30 seconds. A small local JSON library combines authored threads and vocabulary templates without runtime AI or external services. Saved and displayed scrollback are capped at 200 messages. `/clear` removes chat without affecting purchases or bank history; durable delivery cursors prevent cleared or pruned messages from replaying. Offline catch-up and overlapping client polls are bounded. Migration 0013 adds per-save channel cursors while retaining existing chat and exploit ownership.

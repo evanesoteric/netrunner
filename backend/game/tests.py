@@ -1975,12 +1975,14 @@ class IrcExploitTests(APIHelpers, TestCase):
         self.assertTrue(any('ssh-v1-r1-license' in row['text'] for row in self.irc('/list')['irc']['messages']))
 
     def test_invalid_trades_are_atomic_and_do_not_move_funds(self):
+        self.slot.refresh_from_db()
+        original_messages = list(self.slot.irc_messages)
         for command in ['/buy missing', '/pay hexdealer 1 ssh-v1-r1-shot', '/msg packetwitch buy ssh-v1-r1-shot', '/buy ssh-v2-r1-license', '/pay hexdealer -90 ssh-v1-r1-shot', '/msg']:
             self.irc(command, 400)
         self.slot.refresh_from_db()
         self.assertEqual(self.slot.balance, 1200)
         self.assertEqual(self.slot.exploit_inventory, {})
-        self.assertEqual(self.slot.irc_messages, [])
+        self.assertEqual(self.slot.irc_messages, original_messages)
         self.assertFalse(self.slot.ledger.exists())
         self.irc('/buy ssh-v1-r1-license')
         self.irc('/buy ssh-v1-r1-license', 400)
@@ -2117,7 +2119,10 @@ class IrcExploitTests(APIHelpers, TestCase):
         drops = [row for row in thirty['messages'] if row.get('kind') == 'drop']
         self.assertEqual(len(drops), 2)
         days_later = read(5 * 24 * 60 * 60)
-        self.assertLessEqual(len(days_later['messages']) - len(thirty['messages']), 10)
+        self.assertEqual(len(days_later['messages']), 200)
+        self.assertEqual(sum(row.get('kind') == 'chat' for row in days_later['messages']), 150)
+        self.assertEqual(sum(row.get('kind') == 'drop' for row in days_later['messages']), 50)
+        self.assertTrue(all(row['at'] > thirty['messages'][-1]['at'] for row in days_later['messages']))
         self.assertEqual(days_later['messages'], read(5 * 24 * 60 * 60)['messages'])
         self.slot.refresh_from_db()
         self.assertEqual(self.slot.balance, 1200)
@@ -2160,3 +2165,46 @@ class IrcExploitTests(APIHelpers, TestCase):
         self.assertFalse(any(row.get('kind') == 'drop' for row in data['messages']))
         self.slot.refresh_from_db()
         self.assertEqual(self.slot.irc_state, dict(chat_tick=2, trade_tick=0))
+
+
+    def test_regular_slot_refresh_advances_chat_without_opening_irc(self):
+        from unittest.mock import patch
+        self.slot.refresh_from_db()
+        initial = list(self.slot.irc_messages)
+        with patch('django.utils.timezone.now', return_value=self.slot.created_at + timedelta(seconds=35)):
+            response = self.client.get(f'/api/slots/{self.slot.id}/')
+        self.assertEqual(response.status_code, 200)
+        self.slot.refresh_from_db()
+        self.assertEqual(self.slot.irc_state, dict(chat_tick=3, trade_tick=1))
+        self.assertEqual(len(self.slot.irc_messages), len(initial) + 4)
+        self.assertEqual(self.slot.running_apps, {'terminal': 'terminal'})
+        self.assertEqual(self.slot.balance, 1200)
+
+    def test_chat_continues_past_200_without_wiping_history_or_replaying_rows(self):
+        from unittest.mock import patch
+        path = f'/api/slots/{self.slot.id}/'
+        with patch('django.utils.timezone.now', return_value=self.slot.created_at + timedelta(seconds=3000)):
+            self.client.get(path)
+        self.slot.refresh_from_db()
+        old = list(self.slot.irc_messages)
+        self.assertEqual(len(old), 200)
+        with patch('django.utils.timezone.now', return_value=self.slot.created_at + timedelta(seconds=3010)):
+            self.client.get(path)
+            self.slot.refresh_from_db()
+            new = list(self.slot.irc_messages)
+            self.client.get(path)
+        self.slot.refresh_from_db()
+        self.assertEqual(len(new), 200)
+        self.assertEqual(old[1:], new[:-1])
+        self.assertEqual(self.slot.irc_messages, new)
+        self.assertNotEqual(old[-1], new[-1])
+
+    def test_existing_save_gets_current_history_even_if_irc_never_opened(self):
+        old = SaveSlot.objects.create(user=self.user, position=2, alias='Old')
+        SaveSlot.objects.filter(pk=old.pk).update(created_at=timezone.now() - timedelta(days=5))
+        response = self.client.get(f'/api/slots/{old.pk}/')
+        self.assertEqual(response.status_code, 200)
+        old.refresh_from_db()
+        self.assertEqual(len(old.irc_messages), 200)
+        self.assertGreaterEqual(old.irc_state['chat_tick'], 5 * 24 * 60 * 6)
+        self.assertEqual(old.balance, 1200)

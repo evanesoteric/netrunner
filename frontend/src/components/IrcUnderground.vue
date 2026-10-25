@@ -46,7 +46,7 @@ onUnmounted(() => { disposed = true; clearInterval(timer) })
       </div>
       <div class="irc-shortcuts"><button v-for="command in ['/help', '/list', '/inventory', '/balance', '/clear']" :key="command" class="text-link" :disabled="busy" @click="submit(command)">{{ command }}</button><button v-if="!following" class="text-link" @click="following = true; update(channel, true)">Jump to latest</button></div>
       <form class="irc-input" @submit.prevent="submit()"><label for="irc-command">{{ slot.alias }} &gt;</label><input id="irc-command" ref="input" v-model="text" maxlength="240" autocomplete="off" spellcheck="false" aria-label="IRC command" placeholder="/msg hexdealer buy ssh-v1-r1-shot" :readonly="busy" /><button class="button secondary" :disabled="busy || !text.trim()">Send</button></form>
-      <p class="irc-hint">Scrollback is capped at {{ channel?.scrollback_limit || 200 }} messages. /clear clears saved chat; purchases stay in your stash and bank ledger.</p>
+      <p class="irc-hint">Chat continues on other pages. Showing the latest {{ channel?.scrollback_limit || 200 }} messages. /clear clears saved chat; purchases stay in your stash and bank ledger.</p>
       <p class="irc-hint">/pay &lt;bot&gt; &lt;CPH&gt; &lt;exploit-id&gt; transfers the exact price and delivers your purchase atomically. These are simulated bots, not live players.</p>
     </section>
     <aside class="irc-trades">

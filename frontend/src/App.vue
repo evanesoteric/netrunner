@@ -209,7 +209,10 @@ async function restartRunner() {
 }
 function openSaves() { act(async () => { await loadSaves(); page.value = 'saves' }) }
 async function refreshTrace() {
-  if (!slot.value || (!slot.value.connected && !slot.value.ransomware_ops.length && !slot.value.broker_next_at && page.value !== 'broker') || busy.value || polling) return
+  if (!slot.value || busy.value || polling) return
+  const urgent = slot.value.connected || slot.value.ransomware_ops.length || slot.value.broker_next_at || page.value === 'broker'
+  // Idle pages still advance IRC every ten seconds; its own page already polls.
+  if (!urgent && (page.value === 'irc' || Date.now() - responseTime.value < 10000)) return
   polling = true
   const marker = revision, id = slot.value.id
   try { const result = await api(`slots/${id}/`); if (revision === marker && !busy.value && slot.value?.id === id) updateSlot(result) } catch { /* commands report actionable connection errors */ } finally { polling = false }

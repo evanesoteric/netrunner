@@ -34,6 +34,11 @@ function filterMail() {
   filters.value = { q:search.value, category:category.value, unread:unread.value ? '1' : '0' }
   selected.value = null; load(1, true)
 }
+async function moveMessage(action) {
+  if (props.busy || !selected.value || !mailbox.value) return
+  const response = await props.mutate({ action, message_id:selected.value.id, identity:mailbox.value.identity }, props.slot.id)
+  if (response) { result.value = response.message; selected.value = null; await load(1, true) }
+}
 async function markMatchingRead() {
   if (props.busy || !mailbox.value) return
   const response = await props.mutate({ action:'read_all', identity:mailbox.value.identity, folder:'inbox', snapshot:mailbox.value.snapshot, ...filters.value }, props.slot.id)
@@ -86,21 +91,23 @@ async function send() {
     if (!disposed && response) { result.value = response.message; clearDraft(); selected.value = null; await load(1, true) }
   } finally { sending.value = false }
 }
-watch(() => [props.slot.mail_latest_id, props.slot.mail_unread], () => { if (!sending.value && mailbox.value) load(mailbox.value.page).catch(() => {}) })
+watch(() => [props.slot.mail_latest_id, props.slot.mail_unread, props.slot.mail_revision], () => { if (!sending.value && mailbox.value) load(mailbox.value.page).catch(() => {}) })
 onMounted(() => load(1, true))
 onUnmounted(() => { disposed = true; version++ })
 </script>
 <template>
   <div class="eyebrow">COMMUNICATIONS / ENCRYPTED MAIL</div>
   <div class="page-heading"><div><h1>Every message matters<span>_</span></h1><p>Briefings, evidence deliveries and agency correspondence. Fictional in-game mail only.</p></div><span class="badge">{{ slot.mail_unread || 0 }} UNREAD</span></div>
-  <div class="mail-toolbar"><button class="button secondary" @click="switchFolder('inbox')" :disabled="busy">Inbox</button><button class="button secondary" @click="switchFolder('sent')" :disabled="busy">Sent</button><button class="button primary" @click="compose()" :disabled="busy"><Send :size="14" />Compose</button><button class="text-link" @click="load(1,true)" :disabled="loading">Refresh mail</button><span class="micro">{{ mailbox?.address }}</span></div>
+  <div class="mail-toolbar"><button class="button secondary" @click="switchFolder('inbox')" :disabled="busy">Inbox</button><button class="button secondary" @click="switchFolder('sent')" :disabled="busy">Sent</button><button class="button secondary" @click="switchFolder('archive')" :disabled="busy">Archive</button><button class="button secondary" @click="switchFolder('trash')" :disabled="busy">Trash</button><button class="button primary" @click="compose()" :disabled="busy"><Send :size="14" />Compose</button><button class="text-link" @click="load(1,true)" :disabled="loading">Refresh mail</button><span class="micro">{{ mailbox?.address }}</span></div>
   <form class="mail-search" @submit.prevent="filterMail"><label>SEARCH MAIL<input v-model="search" aria-label="Search mail" maxlength="120" placeholder="Subject, message or contact" /></label><label>CATEGORY<select v-model="category" aria-label="Mail category"><option value="all">All mail</option><option value="contracts">Contracts</option><option value="agency">Agency cases</option><option value="receipts">Bank receipts</option><option value="personal">Personal messages</option></select></label><label class="mail-unread-filter"><input type="checkbox" v-model="unread" aria-label="Unread mail only" />Unread only</label><button class="button secondary" :disabled="loading || busy">Search</button><button v-if="folder === 'inbox'" type="button" class="text-link" :disabled="busy || loading || !mailbox?.messages.some(row => !row.read)" @click="markMatchingRead">Mark matching inbox read</button></form>
   <p v-if="hasDraft" class="info-banner mail-draft-state">{{ draftAvailable ? 'Draft saved in this browser for this runner.' : 'Draft recovery unavailable. Keep this tab open until your message is sent.' }}<button v-if="!composing" class="text-link" @click="composing = true">Resume draft</button><button class="text-link danger-text" :disabled="sending || busy" @click="clearDraft">Discard draft</button></p>
   <p v-if="error" class="message error" role="alert">{{ error }}</p><p v-if="result" class="info-banner" role="status">{{ result }}</p>
+  <p v-if="folder === 'trash'" class="info-banner">Deleted messages stay in Trash until restored. Briefings, attachments and case records are preserved.</p>
+  <p v-if="folder === 'archive'" class="info-banner">Archived correspondence stays searchable and available for replies and record keeping.</p>
   <p v-if="mailbox?.has_newer" class="info-banner">New mail available. Refresh mail to include it.</p>
   <div class="mail-layout">
     <section class="panel mailbox-list" aria-label="Mail messages"><div class="panel-title"><span><Mail :size="16" />{{ folder.toUpperCase() }}</span><span class="micro">{{ mailbox?.total || 0 }} MESSAGES</span></div>
-      <button v-for="message in mailbox?.messages || []" :key="message.id" class="mail-row" :class="{ unread: !message.read && folder === 'inbox', selected: selected?.id === message.id }" :data-mail-kind="message.kind" @click="open(message)" :disabled="busy || sending"><strong>{{ message.subject }}</strong><span>{{ folder === 'inbox' ? message.sender : message.recipient }}</span><small>{{ new Date(message.created_at).toLocaleString() }}{{ message.attachments.length ? ' · ATTACHMENTS' : '' }}</small></button>
+      <button v-for="message in mailbox?.messages || []" :key="message.id" class="mail-row" :class="{ unread: !message.read && message.original_folder === 'inbox' && folder !== 'trash', selected: selected?.id === message.id }" :data-mail-kind="message.kind" @click="open(message)" :disabled="busy || sending"><strong>{{ message.subject }}</strong><span>{{ folder === 'inbox' ? message.sender : message.recipient }}</span><small>{{ new Date(message.created_at).toLocaleString() }}{{ message.attachments.length ? ' · ATTACHMENTS' : '' }}</small></button>
       <p v-if="mailbox && !mailbox.messages.length" class="empty-state">No messages in this folder.</p>
       <nav class="bank-pagination" aria-label="Mail pages"><button class="text-link" :disabled="loading || !mailbox || mailbox.page <= 1" @click="load(mailbox.page-1)">Previous</button><span class="micro">{{ mailbox?.page || 1 }} / {{ mailbox?.pages || 1 }}</span><button class="text-link" :disabled="loading || !mailbox || mailbox.page >= mailbox.pages" @click="load(mailbox.page+1)">Next</button></nav>
     </section>
@@ -117,7 +124,8 @@ onUnmounted(() => { disposed = true; version++ })
       </form>
       <template v-else-if="selected"><span class="micro">{{ selected.sender }} → {{ selected.recipient }}</span><h2>{{ selected.subject }}</h2><time class="micro">{{ new Date(selected.created_at).toLocaleString() }}</time><span v-if="selected.assignment_status || selected.case_status" class="badge mail-status">{{ (selected.assignment_status || selected.case_status).toUpperCase() }}</span><pre class="mail-body">{{ selected.body }}</pre>
         <div v-if="selected.attachments.length" class="mail-attachments"><span class="micro">ARCHIVED ATTACHMENTS</span><p v-for="(file,index) in selected.attachments" :key="index">{{ file.name }}<template v-if="file.size"> · {{ file.size }} MB</template><small v-if="file.receipts">{{ file.receipts.join(', ') }}</small></p></div>
-        <div v-if="selected.folder === 'inbox'" class="mail-toolbar"><button v-if="mailbox?.contacts.includes(selected.sender)" class="button secondary" :disabled="busy" @click="compose(selected)">Reply</button><button v-if="selected.assignment_id && selected.assignment_status === 'accepted' && selected.sender === 'dispatch@broker.internal'" class="button primary" :disabled="busy" @click="compose(selected, 'deliver')">Submit contract by email</button><template v-if="selected.case_id && selected.case_status !== 'closed' && selected.sender === 'enforcement@sib.internal'"><button class="button secondary" @click="emit('bank')">Open Cipher Bank</button><button class="button primary" :disabled="busy" @click="compose(selected, 'confirm')">Confirm settlement by email</button></template></div>
+        <div class="mail-toolbar"><button v-if="['inbox','sent'].includes(selected.folder)" class="button secondary" :disabled="busy" @click="moveMessage('archive')">Archive message</button><button v-if="selected.folder !== 'trash'" class="button secondary" :disabled="busy" @click="moveMessage('delete')">Delete message</button><button v-if="['archive','trash'].includes(selected.folder)" class="button secondary" :disabled="busy" @click="moveMessage('restore')">Restore to {{ selected.original_folder === 'sent' ? 'Sent' : 'Inbox' }}</button></div>
+        <div v-if="selected.original_folder === 'inbox' && selected.folder !== 'trash'" class="mail-toolbar"><button v-if="mailbox?.contacts.includes(selected.sender)" class="button secondary" :disabled="busy" @click="compose(selected)">Reply</button><button v-if="selected.assignment_id && selected.assignment_status === 'accepted' && selected.sender === 'dispatch@broker.internal'" class="button primary" :disabled="busy" @click="compose(selected, 'deliver')">Submit contract by email</button><template v-if="selected.case_id && selected.case_status !== 'closed' && selected.sender === 'enforcement@sib.internal'"><button class="button secondary" @click="emit('bank')">Open Cipher Bank</button><button class="button primary" :disabled="busy" @click="compose(selected, 'confirm')">Confirm settlement by email</button></template></div>
       </template>
       <p v-else class="empty-state">Select a message or compose a new one. Accepted contract briefings arrive automatically.</p>
     </section>

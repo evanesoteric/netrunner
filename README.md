@@ -77,7 +77,7 @@ Stop with **Ctrl+C**, then `docker compose down`. Start again with `docker compo
 | Desktop | View your rig, runner status, and current assignment. |
 | Workspace | Arrange the primary terminal, Atlas, and personal panels; layouts save across sessions. |
 | Contract broker | Browse, accept, and abort contracts. |
-| Email | Read briefings, send messages and attachments, deliver contracts, and confirm settlements. |
+| Email | Read and archive briefings, delete or restore messages, send attachments, deliver contracts, and confirm settlements. |
 | Cipher bank | Manage current and reserve funds, borrow or repay a loan, pay agency settlements, and browse the full paginated ledger. |
 | Atlas network | Discover servers, manage map bookmarks, and build proxy routes. |
 | Applications | Open system pages and select owned applet licenses for the primary terminal. |

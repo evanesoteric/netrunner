@@ -870,6 +870,7 @@ class DevelopmentDatabaseLifecycleTests(TestCase):
                 run(sys.executable, str(manage), 'shell', '-c', "from game.models import SaveSlot; from game.banking import perform; slot=SaveSlot.objects.get(alias='Archive'); perform(slot, 'loan', 500); perform(slot, 'deposit', 200); slot.save()")
                 run(sys.executable, str(manage), 'shell', '-c', "from game.addresses import ip_for; ip_for('backup-address.internal')")
                 run(sys.executable, str(manage), 'shell', '-c', "from game.models import SaveSlot; from game.assignments import ensure_legacy; from game.mailbox import open_case; slot=SaveSlot.objects.get(alias='Archive'); ensure_legacy(slot); assignment=slot.assignments.get(); assignment.state={'deleted': True, 'clean_exit': True}; assignment.save(); open_case(slot, 'Archive relay', 90, 'Archive trace'); slot.save()")
+                run(sys.executable, str(manage), 'shell', '-c', "from game.models import SaveSlot; from game.exploits import catalog; from game.mailbox import move; slot=SaveSlot.objects.get(alias='Archive'); slot.local_cwd='/exploits'; slot.exploit_inventory={'ssh-v1-r1-shot': {**next(item for item in catalog(slot) if item['id']=='ssh-v1-r1-shot'), 'quantity': 2}}; slot.save(); move(slot, slot.mail.get(kind='briefing').pk, 'archive'); move(slot, slot.mail.get(kind='enforcement').pk, 'delete')")
                 addresses = query('SELECT host, ip FROM game_networkaddress ORDER BY host')
                 identities = query('SELECT template_key, code FROM game_contractidentity ORDER BY template_key')
                 query('CREATE TABLE lifecycle_probe (value text)')
@@ -897,6 +898,8 @@ class DevelopmentDatabaseLifecycleTests(TestCase):
                 self.assertEqual(query("SELECT key, state->>'clean_exit' FROM game_assignment"), [('0-1', 'true')])
                 self.assertEqual(query("SELECT amount, status FROM game_enforcementcase"), [(90, 'unpaid')])
                 self.assertEqual(query("SELECT kind FROM game_mailmessage ORDER BY id"), [('briefing',), ('enforcement',)])
+                self.assertEqual(query("SELECT folder, original_folder FROM game_mailmessage ORDER BY id"), [('archive', 'inbox'), ('trash', 'inbox')])
+                self.assertEqual(query("SELECT local_cwd, exploit_inventory->'ssh-v1-r1-shot'->>'quantity' FROM game_saveslot"), [('/exploits', '2')])
                 self.assertEqual(query("SELECT count(*) FROM game_ledgerentry WHERE account='reserve'"), [(1,)])
                 self.assertEqual(query('SELECT count(*) FROM game_generatedmission'), [(1,)])
                 self.assertEqual(query('SELECT count(*) FROM game_directoryserver'), [(6,)])
@@ -3434,3 +3437,134 @@ class AuditRegressionTests(APIHelpers, TestCase):
         receipts = self.client.get(f'/api/{self.endpoint("mail")}/', dict(category='receipts')).json()
         self.assertEqual(receipts['total'], 1)
         self.assertEqual(receipts['messages'][0]['kind'], 'bank_receipt')
+
+
+class ExploitDirectoryAndMailFoldersTests(APIHelpers, TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user('directory-mail')
+        self.client.force_login(self.user)
+        self.slot = SaveSlot.objects.create(user=self.user, position=1, alias='Directory')
+        self.launch('terminal')
+
+    def buy(self, mode='shot'):
+        from .exploits import buy
+        self.slot.refresh_from_db()
+        buy(self.slot, f'ssh-v1-r1-{mode}')
+        self.slot.save()
+
+    def move(self, message, action, status=200):
+        return self.post(self.endpoint('mail'), dict(action=action, message_id=message.pk, identity=self.slot.created_at.isoformat()), status)
+
+    def folder(self, name, **query):
+        response = self.client.get(f'/api/{self.endpoint("mail")}/', dict(folder=name, **query))
+        self.assertEqual(response.status_code, 200, response.content)
+        return response.json()
+
+    def test_local_exploit_directory_paths_and_space_persist(self):
+        self.assertIn('exploits/  DIR', self.cmd('ls')['mission_log'][-1]['text'])
+        self.assertIn('No exploits installed', self.cmd('ls /exploits')['mission_log'][-1]['text'])
+        self.buy(); self.buy()
+        data = self.cmd('cd exploits')
+        self.assertEqual(data['local_cwd'], '/exploits')
+        self.assertEqual(data['storage_used'], 0.125)
+        self.assertEqual(self.cmd('pwd')['mission_log'][-1]['text'], '/exploits')
+        listing = self.cmd('ls')['mission_log'][-1]['text']
+        self.assertIn('ssh-v1-r1-shot  128 KB', listing)
+        self.assertIn('2 single-use copies', listing)
+        self.client.logout(); self.client.force_login(self.user)
+        self.assertEqual(self.refresh()['local_cwd'], '/exploits')
+        self.assertEqual(self.cmd('cd ../../../../')['local_cwd'], '/')
+        self.assertIn('Local directory not found', self.cmd('cd /missing')['mission_log'][-1]['text'])
+        self.assertEqual(self.cmd('rm /exploits/ssh-v1-r1-shot')['storage_used'], 0)
+        self.assertEqual(self.refresh()['exploits'], [])
+        self.assertIn('Directory removal is not supported', self.cmd('rm /exploits')['mission_log'][-1]['text'])
+
+    def test_running_exploit_by_local_path_consumes_only_one_copy(self):
+        self.buy(); self.buy()
+        self.cmd('cd /exploits')
+        self.reserve(); self.cmd('scan helix-0.internal'); self.cmd('connect helix-0.internal')
+        self.assertEqual(self.cmd('pwd')['mission_log'][-1]['text'], 'You are not logged in. Connect to a server and log in first.')
+        result = self.cmd('exploit ./ssh-v1-r1-shot')
+        self.assertTrue(result['authenticated'])
+        self.assertEqual(result['storage_used'], 0.0625)
+        self.assertEqual(result['exploits'][0]['quantity'], 1)
+        self.clean_exit()
+        self.assertEqual(self.cmd('pwd')['mission_log'][-1]['text'], '/exploits')
+        self.assertIn('ssh-v1-r1-shot', self.cmd('ls')['mission_log'][-1]['text'])
+
+    def test_full_drive_rejects_exploit_purchase_without_charging_or_granting(self):
+        from .mechanics import hardware
+        self.slot.refresh_from_db()
+        self.slot.local_files = [dict(id='full', name='full.dat', source='test.internal', source_path='full.dat', size=hardware(self.slot)['storage']['capacity'])]
+        self.slot.save()
+        self.post(self.endpoint('irc'), dict(command='/buy ssh-v1-r1-shot'), 400)
+        data = self.refresh()
+        self.assertEqual(data['balance'], 1200)
+        self.assertEqual(data['exploits'], [])
+        self.cmd('rm full.dat'); self.buy()
+        self.assertEqual(self.refresh()['storage_used'], 0.0625)
+
+    def test_archived_briefing_can_deliver_and_deleted_briefing_can_be_restored(self):
+        self.gain_access(); self.cmd('get research.dat'); self.clean_exit()
+        parent = self.slot.mail.get(kind='briefing')
+        self.move(parent, 'archive')
+        self.assertEqual(self.folder('inbox')['total'], 0)
+        self.assertEqual(self.folder('archive', q='research')['total'], 1)
+        self.assertIn('Delivery verified', self.cmd('submit')['mission_log'][-1]['text'])
+        self.assertEqual(self.folder('archive')['messages'][0]['assignment_status'], 'completed')
+        self.move(parent, 'delete')
+        self.assertEqual(self.folder('archive')['total'], 0)
+        self.assertEqual(self.folder('trash')['messages'][0]['original_folder'], 'inbox')
+        self.move(parent, 'restore')
+        self.assertEqual(self.folder('inbox')['messages'][-1]['id'], parent.pk)
+
+    def test_trash_blocks_reply_until_restored_without_duplicate_briefings(self):
+        self.reserve()
+        parent = self.slot.mail.get(kind='briefing')
+        self.move(parent, 'delete')
+        self.refresh(); self.refresh()
+        self.assertEqual(self.slot.mail.filter(kind='briefing').count(), 1)
+        self.assertIn('Restore this message from Trash', self.cmd('submit')['mission_log'][-1]['text'])
+        self.move(parent, 'restore')
+        self.assertIn('attach the recovered', self.cmd('submit')['mission_log'][-1]['text'])
+
+    def test_sent_archive_and_trash_keep_attachments_and_retry_records(self):
+        from uuid import uuid4
+        request_id = str(uuid4())
+        payload = dict(action='send', identity=self.slot.created_at.isoformat(), request_id=request_id,
+                       recipient='dispatch@broker.internal', subject='Keep this record', body='Retain the original send reference.', attachments=[])
+        self.post(self.endpoint('mail'), payload)
+        sent = self.slot.mail.get(folder='sent')
+        self.move(sent, 'archive'); self.move(sent, 'delete')
+        self.assertEqual(self.folder('trash')['messages'][0]['original_folder'], 'sent')
+        self.post(self.endpoint('mail'), payload)
+        self.assertEqual(self.slot.mail.filter(request_id=request_id).count(), 1)
+        self.move(sent, 'restore')
+        self.assertEqual(self.folder('sent')['total'], 1)
+        revision = self.refresh()['mail_revision']
+        self.move(sent, 'restore')
+        self.assertEqual(self.refresh()['mail_revision'], revision)
+        other = SaveSlot.objects.create(user=self.user, position=2, alias='Other')
+        self.post(f'slots/{other.pk}/mail', dict(action='delete', message_id=sent.pk, identity=other.created_at.isoformat()), 400)
+
+
+class MailFolderMigrationTests(TransactionTestCase):
+    def test_existing_sent_mail_retains_origin_and_new_local_fields_initialize(self):
+        previous = [('game', '0019_ledgerentry_ledger_save_history_idx_and_more')]
+        executor = MigrationExecutor(connection)
+        try:
+            executor.migrate(previous)
+            old = executor.loader.project_state(previous).apps
+            user = old.get_model('auth', 'User').objects.create(username='folder-upgrade')
+            slot = old.get_model('game', 'SaveSlot').objects.create(user_id=user.pk, position=1, alias='Archive')
+            mail = old.get_model('game', 'MailMessage').objects.create(slot_id=slot.pk, folder='sent', sender='runner@mail.internal', recipient='dispatch@broker.internal', subject='Keep me', body='Archive proof', read=True)
+            upgrade = MigrationExecutor(connection)
+            upgrade.migrate(upgrade.loader.graph.leaf_nodes())
+            from .models import MailMessage
+            saved = MailMessage.objects.get(pk=mail.pk)
+            self.assertEqual((saved.folder, saved.original_folder, saved.body), ('sent', 'sent', 'Archive proof'))
+            saved_slot = SaveSlot.objects.get(pk=slot.pk)
+            self.assertEqual((saved_slot.local_cwd, saved_slot.mail_revision), ('/', 0))
+        finally:
+            restore = MigrationExecutor(connection)
+            restore.migrate(restore.loader.graph.leaf_nodes())

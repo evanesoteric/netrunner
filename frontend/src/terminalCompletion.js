@@ -21,12 +21,20 @@ export function completion(text, cursor, app, slot) {
     if (verb === 'jump') pool = (slot.backdoors || []).flatMap(node => [node.ip_address, node.target])
     if (verb === 'select') pool = (slot.accepted_contracts || []).map(job => String(job.id))
     if (verb === 'accept') pool = (slot.contracts || []).map(job => String(job.id))
-    if (verb === 'exploit') pool = (slot.exploits || []).map(item => item.id)
+    if (verb === 'exploit') pool = (slot.exploits || []).flatMap(item => [item.id, '/exploits/' + item.id])
     if (verb === 'use') pool = slot.installed_software || []
     if (verb === 'logcleaner') pool = (slot.installed_software || []).filter(id => id.startsWith('cleaner-'))
     if (['ls', 'cd', 'cat', 'get', 'rm', 'decrypt'].includes(verb)) {
-      if (!slot.connected && ['rm', 'decrypt'].includes(verb)) pool = (slot.local_files || []).map(file => file.name)
-      else if (slot.connected) {
+      if (!slot.connected) {
+        const cwd = slot.local_cwd || '/'
+        pool = (slot.local_entries || []).filter(entry => verb === 'cd' ? entry.type === 'directory' : verb === 'decrypt' || verb === 'rm' ? entry.type === 'file' : true).map(entry => {
+          const path = entry.path + (entry.type === 'directory' ? '/' : '')
+          if (word.startsWith('/')) return path
+          if (cwd === '/') return path.slice(1)
+          return path.startsWith(cwd + '/') ? path.slice(cwd.length + 1) : '../' + path.slice(1)
+        })
+        if (['cd', 'ls'].includes(verb)) pool.push('/', '..')
+      } else if (slot.connected) {
         const cwd = (slot.remote_cwd || '/').split('/').filter(Boolean)
         pool = (slot.remote_entries || []).filter(entry => ['ls', 'cd'].includes(verb) ? entry.type === 'directory' : entry.type !== 'directory').map(entry => {
           let path = entry.path

@@ -27,23 +27,8 @@ class GameError(Exception):
 
 
 def storage_used(slot):
-    return sum(entry['size'] for entry in slot.local_files)
-
-
-def local_filesystem(slot, verb, args):
-    if verb == 'ls':
-        listing = '\n'.join(f'{entry["name"]}  {entry["size"]} MB  {"encrypted" if entry.get("encrypted") else "readable"}  {entry["source"]}' for entry in slot.local_files) or 'Local directory empty.'
-        return f'LOCAL FILESYSTEM\n{listing}\nStorage: {storage_used(slot)} / {hardware(slot)["storage"]["capacity"]} MB'
-    entry = next((entry for entry in slot.local_files if entry['name'] == args[0]), None)
-    if not entry:
-        raise GameError('Local file not found.')
-    slot.local_files = [item for item in slot.local_files if item['id'] != entry['id']]
-    if slot.mission_state.get('local_file_id') == entry['id']:
-        slot.mission_state.update(recovered=False)
-        slot.mission_state.pop('local_file_id', None)
-        slot.mission_state.pop('local_size', None)
-        slot.mission_state.pop('recovery_receipt', None)
-    return f'{entry["name"]} removed from local storage. Reclaimed {entry["size"]} MB.'
+    from .local_files import exploit_storage
+    return sum(entry['size'] for entry in slot.local_files) + exploit_storage(slot)
 
 
 def copy_to_local(slot, job):
@@ -56,7 +41,7 @@ def copy_to_local(slot, job):
     else:
         original = PurePosixPath(job['file']).name
         name, index = original, 2
-        names = {entry['name'] for entry in slot.local_files}
+        names = {entry['name'] for entry in slot.local_files} | {'exploits'}
         while name in names:
             path = PurePosixPath(original)
             name = f'{path.stem}_{index}{path.suffix}'
@@ -305,7 +290,7 @@ def trade(slot, action, product_id):
 
 
 MANUALS = {
-    'filesystem': 'VIRTUAL REMOTE FILESYSTEM\nls [path] — list a directory (2s trace work)\ncd [path] — change directory (1s); cd alone returns to /\npwd — current directory\ncat <path> — preview text (1s)\nfind <filename-or-glob> — search the current subtree (8s)\nget <path> — download any file; only the exact objective path produces proof\nrm <path> — delete one file; directories cannot be deleted\nUse absolute /paths or relative paths, including .. . Local ls, rm and decrypt work while disconnected. Browsing adds work to the running trace; logs still need cleanup.',
+    'filesystem': 'VIRTUAL REMOTE FILESYSTEM\nls [path] — list a directory (2s trace work)\ncd [path] — change directory (1s); cd alone returns to /\npwd — current directory\ncat <path> — preview text (1s)\nfind <filename-or-glob> — search the current subtree (8s)\nget <path> — download any file; only the exact objective path produces proof\nrm <path> — delete one file; directories cannot be deleted\nUse absolute /paths or relative paths, including .. . Local ls, cd, pwd, rm and decrypt work while disconnected. /exploits contains owned tools (64 KB per license or single-use copy). Browsing adds work to the running trace; logs still need cleanup.',
     'exploit': 'FINGERPRINT EXPLOITS\nBuy licenses or single-use copies in IRC Underground with CPH.\nexploits — list owned fingerprint tools\nexploit <id> — use on the connected, freshly scanned server\nMatch protocol, auth version and patch revision exactly. Uses 2 GB transient RAM.\nA lifetime license is reusable for that fingerprint; single-use copies burn on successful entry only.\nSuccess opens an admin shell immediately, starts a trace and leaves access logs. Clean logs before disconnecting.',
     'terminal': 'LOCAL SHELL\nexploits — list owned fingerprint exploits\nexploit <id> — instant shell using a matching exploit from IRC Underground\napplets — list owned terminal software\nuse <license-id> — select an applet version\ntrace — licensed Tripwire telemetry\ninstall — install owned Wraith rootkit\ndeploy <host> — deploy owned Eclipse ransomware\nhelp — application manual\nrumors — intercepted hidden-service invitation\njump <host> — use an installed Wraith backdoor\napps — running processes and RAM\ncontracts — broker listings\naccept <contract-id> — reserve by the numeric ID in contracts (0–255)\nassignments — list up to ten accepted contracts\nselect <id> — select a saved assignment while disconnected\nbrief — read the selected brief\nroute — inspect the committed proxy chain\nping <IP-or-name> — resolve and check simulated connectivity\nresolve <name> — look up a known server address\nconnect <IP-or-name> — dial a fictional target\nscan <host> — scan with owned Cartograph software\nlogcleaner [license-id] — erase remote logs with an owned Logcleaner license\nlockpick — open the server login dialog\nstatus — gateway status\nhistory — recent operator journal for this target\ndecrypt <local-file> — decrypt a local archive with owned Rosetta software while disconnected\nls [path] — list local files or a remote directory\ncd [path] — change remote directory\npwd — print remote working directory\ncat <path> — preview a remote text file\nfind <filename> — search under the current remote directory (8s trace work)\nget <file> — copy a readable file to local storage\nrm <file> — remove a local file when disconnected; a remote file when logged in\ndisconnect — end the remote session\nsubmit — send an email delivery with objective attachment to the broker\nabort — abandon the contract (fine and reputation loss)\nclear — clear local console output',
     'mapper': 'CARTOGRAPH\nscan <host> — inspect a fictional host and its services\nCosts 1 + tool tier CPH. Scan quality depends on tool capability.',
@@ -379,7 +364,7 @@ def execute(slot, app, raw):
     verb, args = parts[0].lower(), parts[1:]
     remote = session_target(slot) if app == 'terminal' and slot.mission_started and slot.mission_state.get('access') else None
     prompt = f'admin@{ip_for(remote["target"])}' if remote else f'{slot.alias}@{app}'
-    log(slot, app, f'{prompt}:{slot.mission_state.get("cwd", "/") if remote else "~"}$ {raw}')
+    log(slot, app, f'{prompt}:{slot.mission_state.get("cwd", "/") if remote else slot.local_cwd if app == "terminal" else "~"}$ {raw}')
     if verb == 'clear' and app == 'terminal':
         slot.mission_log = [entry for entry in slot.mission_log if entry.get('app') != app]
         return
@@ -474,6 +459,8 @@ def decrypt_local(slot, name):
         slot.mission_state.update(decrypted=True, dirty=True)
         record_action(slot, target, 'file_decrypted', f'{name} decrypted on the remote filesystem.', decrypt=True)
         return f'{name}: decrypted. Checksum intact.'
+    from .local_files import download_name
+    name = download_name(slot, name)
     entry = next((entry for entry in slot.local_files if entry['name'] == name), None)
     if not entry:
         raise GameError('Local file not found.')
@@ -559,7 +546,10 @@ def _shell(slot, verb, args, job):
         if len(args) > 1:
             raise GameError('Use logcleaner [license-id].')
         return clean_logs(slot, args[0] if args else None)
-    if verb in ('ls', 'cd', 'pwd', 'cat', 'find', 'get', 'rm') and (slot.mission_started or verb not in ('ls', 'rm')):
+    if verb in ('ls', 'cd', 'pwd', 'rm') and not slot.mission_started:
+        from .local_files import command
+        return command(slot, verb, args)
+    if verb in ('ls', 'cd', 'pwd', 'cat', 'find', 'get', 'rm'):
         valid = (verb in ('ls', 'cd') and len(args) <= 1) or (verb == 'pwd' and not args) or (verb in ('cat', 'find', 'get', 'rm') and len(args) == 1)
         if not valid:
             raise GameError(f'Invalid arguments for {verb}. Use help filesystem.')
@@ -589,9 +579,7 @@ def _shell(slot, verb, args, job):
     if verb == 'route' and not args:
         return 'GATEWAY → ' + ' → '.join([get_server(key)['name'] + ' [' + ip_for(get_server(key)['address']) + ']' for key in slot.proxy_route] + ['TARGET']) + f'\nConnection lease: {route_stats(slot)["fee"]} CPH'
     if verb == 'status' and not args:
-        return f'Balance: {slot.balance} CPH\nRAM: {ram_used(slot)}/{hardware(slot)["memory"]["ram"]} GB\nRemote: {ip_for(job["target"]) if job and slot.mission_started else "disconnected"}\nLocal archive: {len(slot.local_files)} files / {storage_used(slot)} MB'
-    if verb in ('ls', 'rm') and not slot.mission_started:
-        return local_filesystem(slot, verb, args)
+        return f'Balance: {slot.balance} CPH\nRAM: {ram_used(slot)}/{hardware(slot)["memory"]["ram"]} GB\nRemote: {ip_for(job["target"]) if job and slot.mission_started else "disconnected"}\nLocal archive: {len(slot.local_files)} files / {storage_used(slot):g} MB'
     if verb in ('ls', 'get', 'rm'):
         require_login(slot)
     if not job:

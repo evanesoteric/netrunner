@@ -59,6 +59,7 @@ def deletion_progress(slot, job):
 
 def serialize(slot, detailed=False):
     from .exploits import inventory
+    from .local_files import entries as local_entries
     from .broker import offered_jobs
     jobs = offered_jobs(slot) if detailed else []
     accepted_rows = list(slot.assignments.filter(status='accepted'))
@@ -82,6 +83,7 @@ def serialize(slot, detailed=False):
         'active_contract': public_job(job, mapping),
         'accepted_contracts': accepted, 'contract_limit': 10,
         'mail_unread': slot.mail.filter(folder='inbox', read=False).count(),
+        'mail_revision': slot.mail_revision,
         'mail_latest_id': slot.mail.values_list('id', flat=True).first() or 0,
         'enforcement_cases': cases(slot),
         'deletion_progress': deletion_progress(slot, job),
@@ -123,6 +125,8 @@ def serialize(slot, detailed=False):
             'workspace_revision': slot.workspace_revision,
             'equipment': hardware(slot),
             'local_files': slot.local_files,
+            'local_cwd': slot.local_cwd,
+            'local_entries': local_entries(slot),
             'exploits': inventory(slot),
             'applet_preferences': slot.applet_preferences,
             'storage_used': storage_used(slot),
@@ -149,7 +153,7 @@ def serialize(slot, detailed=False):
 @ensure_csrf_cookie
 @api(['GET'], authenticated=False)
 def session(request):
-    return JsonResponse({'user': {'username': request.user.username} if request.user.is_authenticated else None, 'currency': CURRENCY, 'ranks': RANKS, 'version': '0.22.0', 'server_time': timezone.now().isoformat()})
+    return JsonResponse({'user': {'username': request.user.username} if request.user.is_authenticated else None, 'currency': CURRENCY, 'ranks': RANKS, 'version': '0.23.0', 'server_time': timezone.now().isoformat()})
 
 @api(['POST'], authenticated=False)
 def register(request):
@@ -318,7 +322,7 @@ def restart(request, slot_id):
     if request.data.get('confirmation') != slot.alias:
         raise GameError('Type the runner alias exactly to confirm restarting this slot.')
     fresh = SaveSlot(user=request.user, alias=slot.alias, position=slot.position)
-    for field in ['balance', 'reserve_balance', 'loan_balance', 'loan_principal', 'loan_fee', 'loan_started_at', 'reputation', 'completed', 'equipment', 'owned_hardware', 'installed_software', 'running_apps', 'proxy_route', 'atlas_nodes', 'active_contract', 'mission_started', 'mission_state', 'local_files', 'exploit_inventory', 'irc_messages', 'irc_state', 'applet_preferences', 'broker_jobs', 'broker_consumed', 'broker_pending', 'broker_codes', 'mission_log', 'contract_cooldowns', 'backdoors', 'ransomware_ops', 'remote_host', 'market_unlocked', 'field_notes', 'notes_revision', 'notes_updated_at', 'workspace_layout', 'workspace_revision']:
+    for field in ['balance', 'reserve_balance', 'loan_balance', 'loan_principal', 'loan_fee', 'loan_started_at', 'reputation', 'completed', 'equipment', 'owned_hardware', 'installed_software', 'running_apps', 'proxy_route', 'atlas_nodes', 'active_contract', 'mission_started', 'mission_state', 'local_files', 'local_cwd', 'mail_revision', 'exploit_inventory', 'irc_messages', 'irc_state', 'applet_preferences', 'broker_jobs', 'broker_consumed', 'broker_pending', 'broker_codes', 'mission_log', 'contract_cooldowns', 'backdoors', 'ransomware_ops', 'remote_host', 'market_unlocked', 'field_notes', 'notes_revision', 'notes_updated_at', 'workspace_layout', 'workspace_revision']:
         setattr(slot, field, getattr(fresh, field))
     slot.created_at = timezone.now()
     slot.save()
@@ -504,7 +508,7 @@ def bank(request, slot_id):
 @api(['GET', 'POST'])
 @transaction.atomic
 def mail(request, slot_id):
-    from .mailbox import send, serialize as serialize_mail, address, BROKER, AGENCY, filtered_messages
+    from .mailbox import send, serialize as serialize_mail, address, BROKER, AGENCY, filtered_messages, move, touch
     slot = SaveSlot.objects.select_for_update().get(pk=slot_id, user=request.user)
     settle(slot)
     if request.method == 'POST':
@@ -514,7 +518,9 @@ def mail(request, slot_id):
             message_id = request.data.get('message_id')
             if type(message_id) is not int or not slot.mail.filter(pk=message_id).exists():
                 raise GameError('Message not found in this save.')
-            slot.mail.filter(pk=message_id).update(read=True)
+            changed = slot.mail.filter(pk=message_id, read=False).update(read=True)
+            if changed:
+                touch(slot)
             result = 'Message read.'
         elif request.data.get('action') == 'read_all':
             if request.data.get('folder', 'inbox') != 'inbox':
@@ -524,11 +530,15 @@ def mail(request, slot_id):
             if type(snapshot) is not int or not 0 <= snapshot <= latest:
                 raise GameError('Refresh mail before marking messages read.')
             count = filtered_messages(slot, request.data).filter(id__lte=snapshot, read=False).update(read=True)
+            if count:
+                touch(slot)
             result = f'{count} matching inbox messages marked read.'
+        elif request.data.get('action') in ('archive', 'delete', 'restore'):
+            result = move(slot, request.data.get('message_id'), request.data['action'])
         elif request.data.get('action') == 'send':
             result = send(slot, request.data)
         else:
-            raise GameError('Choose read, read_all or send.')
+            raise GameError('Choose read, read_all, archive, delete, restore or send.')
         slot.save()
         return JsonResponse({'message': result, 'slot': serialize(slot, True)})
     query = filtered_messages(slot, request.GET)

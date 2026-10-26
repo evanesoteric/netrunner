@@ -14,7 +14,13 @@ def address(slot):
     return f'runner-{slot.pk}@mail.internal'
 
 
+def touch(slot):
+    slot.mail_revision += 1
+    slot.save(update_fields=['mail_revision'])
+
+
 def incoming(slot, sender, subject, body, **extra):
+    touch(slot)
     return MailMessage.objects.create(slot=slot, sender=sender, recipient=address(slot), subject=subject[:180], body=body, **extra)
 
 
@@ -71,7 +77,7 @@ def pay_case(slot, reference, recipient, amount):
 
 
 def serialize(message):
-    return dict(id=message.pk, folder=message.folder, sender=message.sender, recipient=message.recipient,
+    return dict(id=message.pk, folder=message.folder, original_folder=message.original_folder, sender=message.sender, recipient=message.recipient,
                 subject=message.subject, body=message.body, kind=message.kind, read=message.read,
                 assignment_id=message.assignment_id, assignment_status=message.assignment.status if message.assignment_id else None,
                 case_id=message.case_id, case_status=message.case.status if message.case_id else None, reply_to=message.reply_to_id,
@@ -99,8 +105,10 @@ def send(slot, data):
     reply = data.get('reply_to')
     if reply is not None and type(reply) is not int:
         raise GameError('Choose a valid message to reply to.')
-    parent = slot.mail.select_related('assignment', 'case').filter(pk=reply, folder='inbox').first() if reply else None
+    parent = slot.mail.select_related('assignment', 'case').filter(pk=reply, folder__in=['inbox', 'archive'], original_folder='inbox').first() if reply else None
     if reply and not parent:
+        if slot.mail.filter(pk=reply, folder='trash').exists():
+            raise GameError('Restore this message from Trash before replying or submitting.')
         raise GameError('Reply message not found in this save.')
     ids = data.get('attachments', [])
     if not isinstance(ids, list) or len(ids) > 10 or any(not isinstance(item, str) for item in ids) or len(ids) != len(set(ids)):
@@ -122,10 +130,11 @@ def send(slot, data):
     if action == 'deliver' and parent.assignment.descriptor.get('objective') == 'delete':
         state = slot.mission_state if slot.active_contract == parent.assignment.key else parent.assignment.state
         attachment_copies.append(dict(name='deletion-receipts.json', receipts=state.get('deletion_receipts', []), deleted=bool(state.get('deleted')), clean_exit=bool(state.get('clean_exit'))))
-    sent = MailMessage.objects.create(slot=slot, folder='sent', sender=address(slot), recipient=recipient,
+    sent = MailMessage.objects.create(slot=slot, folder='sent', original_folder='sent', sender=address(slot), recipient=recipient,
                                       subject=subject.strip(), body=body.strip(), attachments=attachment_copies,
                                       assignment=parent.assignment if parent else None, case=parent.case if parent else None,
                                       reply_to=parent, request_id=request_id, read=True, kind=action)
+    touch(slot)
     result = 'Message sent.'
     if action == 'deliver':
         if parent.assignment.status != 'accepted':
@@ -172,7 +181,7 @@ def filtered_messages(slot, params):
     category = params.get('category', 'all')
     text = params.get('q', '')
     unread = params.get('unread', '0')
-    if folder not in ('inbox', 'sent') or category not in ('all', 'contracts', 'agency', 'receipts', 'personal'):
+    if folder not in ('inbox', 'sent', 'archive', 'trash') or category not in ('all', 'contracts', 'agency', 'receipts', 'personal'):
         raise GameError('Choose a valid mail folder and category.')
     if not isinstance(text, str) or len(text) > 120 or '\x00' in text:
         raise GameError('Mail search must contain at most 120 characters.')
@@ -193,3 +202,28 @@ def filtered_messages(slot, params):
         term = text.strip()
         query = query.filter(Q(subject__icontains=term) | Q(body__icontains=term) | Q(sender__icontains=term) | Q(recipient__icontains=term))
     return query
+
+
+def move(slot, message_id, action):
+    if type(message_id) is not int:
+        raise GameError('Choose a message from this save.')
+    message = slot.mail.filter(pk=message_id).first()
+    if not message:
+        raise GameError('Message not found in this save.')
+    if action == 'archive':
+        if message.folder == 'trash':
+            raise GameError('Restore the message from Trash before archiving it.')
+        destination = 'archive'
+    elif action == 'delete':
+        destination = 'trash'
+    elif action == 'restore':
+        destination = message.original_folder
+    else:
+        raise GameError('Choose archive, delete or restore.')
+    if destination != message.folder:
+        if message.folder in ('inbox', 'sent'):
+            message.original_folder = message.folder
+        message.folder = destination
+        message.save(update_fields=['folder', 'original_folder'])
+        touch(slot)
+    return {'archive':'Message saved to Archive.', 'delete':'Message deleted to Trash. You can restore it later.', 'restore':f'Message restored to {destination.title()}.'}[action]

@@ -49,6 +49,8 @@ class SaveSlot(models.Model):
     irc_messages = models.JSONField(default=list)
     irc_state = models.JSONField(default=dict)
     local_files = models.JSONField(default=list)
+    local_cwd = models.CharField(max_length=128, default='/')
+    mail_revision = models.PositiveIntegerField(default=0)
     mission_state = models.JSONField(default=dict)
     contract_cooldowns = models.JSONField(default=dict)
     completed = models.PositiveIntegerField(default=0)
@@ -182,6 +184,7 @@ class EnforcementCase(models.Model):
 class MailMessage(models.Model):
     slot = models.ForeignKey(SaveSlot, on_delete=models.CASCADE, related_name='mail')
     folder = models.CharField(max_length=8, default='inbox')
+    original_folder = models.CharField(max_length=8, default='inbox')
     sender = models.CharField(max_length=100)
     recipient = models.CharField(max_length=100)
     subject = models.CharField(max_length=180)
